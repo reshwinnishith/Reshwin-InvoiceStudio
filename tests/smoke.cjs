@@ -17,7 +17,7 @@ const get=id=>{if(!elements.has(id))elements.set(id,node(id));return elements.ge
 const context=vm.createContext({
  console,
  localStorage:{getItem:k=>store.get(k)||null,setItem:(k,v)=>store.set(k,v)},
- document:{getElementById:get,createElement:tag=>node(tag),title:'test'},
+ document:{getElementById:get,createElement:tag=>node(tag),addEventListener(){},title:'test'},
  window:{scrollTo(){},addEventListener(){},print(){}},
  navigator:{},confirm:()=>true,
  requestAnimationFrame:fn=>fn(),setTimeout:()=>1,clearTimeout(){},
