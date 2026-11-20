@@ -180,6 +180,7 @@ select{appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns=
 .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 @media (prefers-reduced-motion:reduce){*{transition-duration:.01ms!important;animation-duration:.01ms!important}}
 </style>
+<link rel="stylesheet" href="ui.css">
 </head>
 <body>
 
@@ -207,13 +208,13 @@ select{appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns=
   <!-- GENERATE -->
   <section id="v-generate" hidden>
     <div class="panel">
-      <h2>New invoice</h2>
+      <h2 id="g_heading">New invoice</h2>
       <div class="hint">Pick a client, say what it was for, and the amount.</div>
       <div class="form">
         <div class="f full"><label>To (client)</label><select id="g_client"></select></div>
         <div class="f full"><label>Regarding</label><input id="g_reg" placeholder="Live performance fee (Bass) at ..."></div>
         <div class="f"><label>Amount (INR)</label><input id="g_amt" inputmode="numeric" placeholder="25000"></div>
-        <div class="f"><label>Invoice date</label><input id="g_date" type="date"></div>
+        <div class="f"><label>Invoice date</label><input id="g_date" type="date"></div><div class="f full"><label for="g_tax">GST rate (only if applicable)</label><select id="g_tax"><option value="0">0% — no GST added</option><option value="5">5%</option><option value="12">12%</option><option value="18">18%</option><option value="28">28%</option></select><p class="field-help">Check with your accountant before charging GST. This app does not decide tax applicability.</p></div>
       </div>
       <div class="actions"><button class="btn" id="g_go">Generate invoice</button></div>
     </div>
@@ -224,7 +225,7 @@ select{appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns=
     <div class="stage" id="stage"><div class="paper" id="paper"></div></div>
     <div class="actions">
       <button class="btn" id="dl">Download PDF</button><button class="btn sec" id="copy">Copy as text</button>
-      <button class="btn sec" id="newInv">New invoice</button>
+      <button class="btn sec" id="editInv">Edit invoice</button><button class="btn sec" id="newInv">New invoice</button>
     </div>
     <div class="note">Download PDF opens your print dialog. Choose "Save as PDF", paper A4, margins None.</div>
   </section>
@@ -233,7 +234,7 @@ select{appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns=
   <section id="v-details" hidden>
     <div class="panel">
       <h2>Your details</h2>
-      <div class="hint">The "from" on every invoice. Held for this session.</div>
+      <div class="hint">Your sender details are saved in this browser. Existing invoices keep their original details.</div>
       <div class="form">
         <div class="f full"><label>Name or business</label><input id="f_name"></div>
         <div class="f full"><label>Address</label><textarea id="f_addr" rows="4"></textarea></div>
@@ -248,19 +249,32 @@ select{appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns=
     </div>
   </section>
 
-  <!-- CLIENTS -->
+  <!-- CLIENTS: list-only screen -->
   <section id="v-clients" hidden>
+    <div class="section-title"><div><h2>Your Clients</h2><p id="clientCount" class="hint"></p></div></div>
+    <div class="list" id="clientList"></div>
+    <div class="center-action"><button id="addClient" class="fab" aria-label="Add Client">+</button><span>Add Client</span></div>
+  </section>
+
+  <!-- CLIENT DETAILS -->
+  <section id="v-client" hidden>
+    <div class="panel" id="clientDetail"></div>
+    <div class="actions"><button class="btn" id="viewEditClient">Edit Client</button></div>
+  </section>
+
+  <!-- ADD/EDIT CLIENT -->
+  <section id="v-client-edit" hidden>
     <div class="panel">
-      <div class="subhead">Saved clients</div>
-      <div class="list" id="clientList" style="margin-bottom:22px"></div>
-      <div class="subhead" id="c_head">Add a client</div>
+      <h2 id="ce_title">Add Client</h2>
+      <p class="hint">Enter the details you want to appear on an invoice.</p>
       <div class="form">
-        <div class="f full"><label>Client name</label><input id="c_name"></div>
-        <div class="f full"><label>Address</label><textarea id="c_addr"></textarea></div>
-        <div class="f"><label>PAN (optional)</label><input id="c_pan"></div>
-        <div class="f"><label>GSTIN (optional)</label><input id="c_gstin"></div>
+        <div class="f full"><label for="ce_name">Client name</label><input id="ce_name" autocomplete="organization"></div>
+        <div class="f full"><label for="ce_addr">Address</label><textarea id="ce_addr" rows="4"></textarea></div>
+        <div class="f"><label for="ce_pan">PAN (optional)</label><input id="ce_pan" autocapitalize="characters"></div>
+        <div class="f"><label for="ce_gstin">GSTIN (optional)</label><input id="ce_gstin" autocapitalize="characters"></div>
       </div>
-      <div class="actions"><button class="btn" id="c_add">Add client</button><button class="btn sec" id="c_cancel" hidden>Cancel</button></div>
+      <div class="actions"><button class="btn" id="ce_save">Save Client</button><button class="btn sec" id="ce_cancel">Cancel</button></div>
+      <button class="destructive" id="ce_delete" hidden>Remove client</button>
     </div>
   </section>
 
@@ -268,196 +282,16 @@ select{appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns=
   <section id="v-settings" hidden>
     <div class="panel">
       <h2>Settings</h2>
-      <div class="hint">More arrives with login: accounts, saved history, export and backup.</div>
+      <div class="hint">Your invoices and clients are stored only in this browser. Export a backup regularly.</div>
       <button class="setrow" id="setDetails"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg><span class="l">Your details</span><span class="ch"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></span></button>
       <button class="setrow" id="setClients"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="9" cy="8" r="3.4"/><path d="M2 20c0-3.5 3.3-5.5 7-5.5s7 2 7 5.5"/><path d="M16 5.2A3.4 3.4 0 0 1 16 11M22 20c0-2.8-1.8-4.6-4.3-5.2"/></svg><span class="l">Clients</span><span class="ch"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></span></button>
-      <div class="note" style="margin-top:14px">Reshwin Invoice Studio. Data is held for this session only until login is added.</div>
+      <div class="actions"><button class="btn sec" id="exportBackup">Export backup</button><button class="btn sec" id="importBackup">Restore backup</button><input type="file" id="backupFile" accept="application/json,.json" hidden></div><p class="note">Backups contain personal, client and bank details. Store them securely. Clearing browser data or using another device will not carry invoices across automatically.</p>
     </div>
   </section>
 </div>
 <div class="toast" id="toast"></div>
 
-<script>
-var state={
-  from:{name:"Reshwin Nishith",
-    addr:"Plot 1799, I-Block 2nd Street,\nAnna Nagar West, Chennai,\nTamil Nadu 600040",
-    pan:"AVOPN7149N",type:"Savings",
-    bank:"HDFC Bank",branch:"Shenoy Nagar Branch",acc:"50100160501043",ifsc:"HDFC0001587"},
-  clients:[{name:"BTOS Talent Management Pvt Ltd",
-    addr:"No. 9/2/7, 5th Floor, Alcazar Apartment,\n5th C Street, Hutchins Road, Cooke Town,\nBengaluru, Karnataka 560084",
-    pan:"AAHCB8040R",gstin:"29AAHCB8040R1ZZ"}],
-  invoices:[], seq:1
-};
-var $=function(id){return document.getElementById(id)};
-var GEAR='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-2.7 1.1V21a2 2 0 1 1-4 0v-.1A1.6 1.6 0 0 0 7 19.4a1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0-1.1-2.7H1a2 2 0 1 1 0-4h.1A1.6 1.6 0 0 0 2.6 7a1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H7a1.6 1.6 0 0 0 1-1.5V1a2 2 0 1 1 4 0v.1A1.6 1.6 0 0 0 17 2.6a1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V7a1.6 1.6 0 0 0 1.5 1H23a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z"/></svg>';
-var ARROW='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 6l-6 6 6 6"/></svg>';
-var TITLES={generate:'Generate',invoice:'Invoice',details:'Your details',clients:'Clients',settings:'Settings'};
-var VIEWS=['home','generate','invoice','details','clients','settings'];
-
-function renderBar(view){
-  var bar=$('bar');
-  if(view==='home'){
-    bar.innerHTML='<span class="mark"></span><span class="brandtext"><span class="t">Reshwin Invoice Studio</span><span class="s">Simple invoicing</span></span>'+
-      '<span class="spacer"></span><button class="iconbtn" id="setBtn" aria-label="Settings">'+GEAR+'</button>';
-    $('setBtn').onclick=function(){go('settings')};
-  }else{
-    bar.innerHTML='<button class="iconbtn back" id="backBtn" aria-label="Back">'+ARROW+'</button><span class="bartitle">'+(TITLES[view]||'')+'</span>';
-    $('backBtn').onclick=function(){go('home')};
-  }
-}
-function go(view){
-  VIEWS.forEach(function(v){$('v-'+v).hidden=(v!==view)});
-  renderBar(view);
-  if(view==='home')renderInvoices();
-  if(view==='generate')fillClients();
-  if(view==='clients')renderClients();
-  if(view==='invoice')scalePaper();
-  window.scrollTo(0,0);
-}
-$('fab').onclick=function(){go('generate')};
-$('navDetails').onclick=function(){go('details')};
-$('navClients').onclick=function(){go('clients')};
-$('setDetails').onclick=function(){go('details')};
-$('setClients').onclick=function(){go('clients')};
-
-/* HOME invoice list */
-function renderInvoices(){
-  var box=$('iblist'),cnt=$('ibcount');
-  cnt.textContent=state.invoices.length?state.invoices.length+(state.invoices.length>1?' invoices':' invoice'):'';
-  box.innerHTML='';
-  if(!state.invoices.length){
-    box.classList.remove('iblist');box.className='ibempty';
-    box.innerHTML='<div class="big">No invoices yet</div><div class="sub">Generate your first invoice to add them.</div>';
-    return;
-  }
-  box.className='iblist';
-  state.invoices.forEach(function(inv){
-    var b=document.createElement('button');b.className='inv';
-    b.innerHTML='<span class="num">'+inv.no+'</span><span class="cn">'+esc(inv.client.name)+'</span><span class="amt">'+fmtINR(inv.amt)+'</span>';
-    b.onclick=function(){showInvoice(inv)};box.appendChild(b);
-  });
-}
-
-/* DETAILS */
-function loadFrom(){var f=state.from;$('f_name').value=f.name;$('f_addr').value=f.addr;$('f_pan').value=f.pan;
-  $('f_type').value=f.type;$('f_bank').value=f.bank;$('f_branch').value=f.branch||'';$('f_acc').value=f.acc;$('f_ifsc').value=f.ifsc;}
-$('f_save').onclick=function(){
-  state.from={name:$('f_name').value.trim(),addr:$('f_addr').value.trim(),pan:$('f_pan').value.trim(),
-    type:$('f_type').value.trim(),bank:$('f_bank').value.trim(),branch:$('f_branch').value.trim(),acc:$('f_acc').value.trim(),ifsc:$('f_ifsc').value.trim()};
-  var s=$('f_flash');s.hidden=false;setTimeout(function(){s.hidden=true},1600);toast('Details saved');
-};
-
-/* CLIENTS */
-function renderClients(){
-  var box=$('clientList');box.innerHTML='';
-  if(!state.clients.length){box.innerHTML='<div class="empty">No clients yet.</div>';return;}
-  state.clients.forEach(function(c,i){
-    var el=document.createElement('div');el.className='item';
-    el.innerHTML='<span class="ix">'+esc(c.name.charAt(0).toUpperCase())+'</span>'+
-      '<span class="id"><span class="in">'+esc(c.name)+'</span><span class="isub">'+esc((c.addr||'').replace(/\n/g,', '))+'</span></span>';
-    var e=document.createElement('button');e.className='ed';e.textContent='Edit';e.title='Edit client';
-    e.onclick=function(){editIdx=i;$('c_name').value=c.name;$('c_addr').value=c.addr||'';$('c_pan').value=c.pan||'';$('c_gstin').value=c.gstin||'';
-      $('c_head').textContent='Edit client';$('c_add').textContent='Save changes';$('c_cancel').hidden=false;$('c_name').focus();$('c_name').scrollIntoView({block:'center'})};
-    var x=document.createElement('button');x.className='del';x.textContent='×';x.title='Remove';
-    x.onclick=function(){state.clients.splice(i,1);if(editIdx===i)resetClientForm();renderClients()};
-    el.appendChild(e);el.appendChild(x);box.appendChild(el);
-  });
-}
-var editIdx=-1;
-function resetClientForm(){editIdx=-1;$('c_name').value='';$('c_addr').value='';$('c_pan').value='';$('c_gstin').value='';
-  $('c_head').textContent='Add a client';$('c_add').textContent='Add client';$('c_cancel').hidden=true}
-$('c_cancel').onclick=resetClientForm;
-$('c_add').onclick=function(){
-  var name=$('c_name').value.trim();if(!name){toast('Add a client name');return;}
-  var c={name:name,addr:$('c_addr').value.trim(),pan:$('c_pan').value.trim(),gstin:$('c_gstin').value.trim()};
-  var edited=editIdx>=0;if(edited)state.clients[editIdx]=c;else state.clients.push(c);
-  resetClientForm();renderClients();toast(edited?'Client updated':'Client added');
-};
-
-/* GENERATE */
-function fillClients(){
-  var sel=$('g_client');var prev=sel.value;sel.innerHTML='';
-  if(!state.clients.length){sel.innerHTML='<option value="">Add a client first</option>';sel.disabled=true;$('g_go').disabled=true;return;}
-  sel.disabled=false;$('g_go').disabled=false;
-  state.clients.forEach(function(c,i){var o=document.createElement('option');o.value=i;o.textContent=c.name;sel.appendChild(o)});
-  if(prev&&state.clients[prev])sel.value=prev;
-  if(!$('g_date').value)$('g_date').value=new Date().toISOString().slice(0,10);
-}
-$('g_go').onclick=function(){
-  var ci=$('g_client').value;if(ci===''){toast('Pick a client');return;}
-  var amt=Math.round(parseFloat(($('g_amt').value||'').replace(/[^0-9.]/g,'')||'0'));
-  var reg=$('g_reg').value.trim();
-  if(!reg){toast('Add what it was for');return;}
-  if(!amt||amt<=0){toast('Add a valid amount');return;}
-  var inv={no:'RESH-'+new Date().getFullYear()+'-'+String(state.seq).padStart(3,'0'),
-    date:$('g_date').value,client:state.clients[ci],reg:reg,amt:amt};
-  state.invoices.unshift(inv);state.seq++;
-  $('g_reg').value='';$('g_amt').value='';
-  showInvoice(inv);
-};
-$('newInv').onclick=function(){go('generate')};
-
-/* INVOICE */
-function showInvoice(inv){renderInvoice(inv);go('invoice')}
-function fmtINR(n){var s=String(n),r=s.length>3?s.slice(0,-3):'',l=s.slice(-3);
-  if(r)r=r.replace(/\B(?=(\d{2})+(?!\d))/g,',');return '₹'+(r?r+',':'')+l+'.00';}
-function fmtDate(v){var d=v?new Date(v+'T00:00:00'):new Date();
-  return d.getDate()+' '+['January','February','March','April','May','June','July','August','September','October','November','December'][d.getMonth()]+' '+d.getFullYear();}
-var ones=['','One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten','Eleven','Twelve','Thirteen','Fourteen','Fifteen','Sixteen','Seventeen','Eighteen','Nineteen'];
-var tens=['','','Twenty','Thirty','Forty','Fifty','Sixty','Seventy','Eighty','Ninety'];
-function two(n){return n<20?ones[n]:tens[Math.floor(n/10)]+(n%10?' '+ones[n%10]:'')}
-function three(n){var h=Math.floor(n/100),r=n%100;return (h?ones[h]+' Hundred'+(r?' ':''):'')+(r?two(r):'')}
-function words(n){if(n===0)return 'Zero';var o='',cr=Math.floor(n/1e7);n%=1e7;var lk=Math.floor(n/1e5);n%=1e5;var th=Math.floor(n/1e3);n%=1e3;
-  if(cr)o+=two(cr)+' Crore ';if(lk)o+=two(lk)+' Lakh ';if(th)o+=two(th)+' Thousand ';if(n)o+=three(n);return o.trim();}
-function esc(s){return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
-function renderInvoice(inv){
-  var f=state.from,c=inv.client,val=fmtINR(inv.amt),plain=val.replace('₹','');
-  var ctax='';
-  if(c.pan)ctax+='<div><span class="k">PAN&nbsp;&nbsp;</span>'+esc(c.pan)+'</div>';
-  if(c.gstin)ctax+='<div><span class="k">GSTIN&nbsp;&nbsp;</span>'+esc(c.gstin)+'</div>';
-  $('paper').innerHTML=
-  '<div class="p-top"></div><div class="p-title">Invoice</div>'+
-  '<div class="p-meta"><div><div class="p-ek">Invoice No.</div><div class="p-ev">'+inv.no+'</div></div>'+
-    '<div><div class="p-ek">Invoice Date</div><div class="p-ev">'+fmtDate(inv.date)+'</div></div></div>'+
-  '<div class="p-parties"><div><div class="p-lbl">From</div><div class="p-nm">'+esc(f.name)+'</div>'+
-      '<div class="p-ad">'+esc(f.addr)+'</div>'+(f.pan?'<div class="p-tax"><div><span class="k">PAN No.&nbsp;&nbsp;</span>'+esc(f.pan)+'</div></div>':'')+'</div>'+
-    '<div><div class="p-lbl">Invoice To</div><div class="p-nm">'+esc(c.name)+'</div>'+
-      '<div class="p-ad">'+esc(c.addr)+'</div>'+(ctax?'<div class="p-tax">'+ctax+'</div>':'')+'</div></div>'+
-  '<table class="p-items"><thead><tr><th>S.No</th><th>Description</th><th class="r">Amount</th></tr></thead>'+
-    '<tbody><tr><td>01</td><td class="desc">'+esc(inv.reg)+'</td><td class="r">'+plain+'</td></tr></tbody></table>'+
-  '<div class="p-spacer"></div>'+
-  '<div class="p-tot"><div class="box"><div class="p-trow"><span>Subtotal</span><span>'+plain+'</span></div>'+
-    '<div class="p-trow line"><span>Tax (GST)</span><span>Not applicable</span></div>'+
-    '<div class="p-grand"><span class="gl">Grand Total</span><span class="gv">'+val+'</span></div></div></div>'+
-  '<div class="p-words"><div class="wk">Amount in words</div><div class="wv">Rupees '+words(inv.amt)+' Only</div></div>'+
-  '<div class="p-bank"><div class="bl">Bank Details for NEFT / RTGS</div><div class="p-bgrid">'+
-    '<span class="k">Name</span><span class="v">'+esc(f.name)+'</span><span class="k">Account No.</span><span class="v">'+esc(f.acc)+'</span>'+
-    '<span class="k">Bank</span><span class="v">'+esc(f.bank)+'</span><span class="k">Branch</span><span class="v">'+esc(f.branch)+'</span>'+
-    '<span class="k">Type</span><span class="v">'+esc(f.type)+'</span><span class="k">IFSC</span><span class="v">'+esc(f.ifsc)+'</span></div></div>';
-  state._last=inv;scalePaper();
-}
-function scalePaper(){
-  var stage=$('stage'),paper=$('paper');if(!stage||$('v-invoice').hidden)return;
-  var s=Math.min(1,stage.clientWidth/794);
-  paper.style.transform='scale('+s+')';stage.style.height=(1123*s)+'px';
-}
-window.addEventListener('resize',scalePaper);
-
-$('dl').onclick=function(){var t=document.title;document.title=(state._last?state._last.no:'Invoice');window.print();setTimeout(function(){document.title=t},500)};
-$('copy').onclick=function(){
-  var inv=state._last;if(!inv)return;var f=state.from,c=inv.client;
-  var t='INVOICE  '+inv.no+'\nDate: '+fmtDate(inv.date)+'\n\nFrom:\n'+f.name+'\n'+f.addr+(f.pan?'\nPAN: '+f.pan:'')+
-    '\n\nTo:\n'+c.name+'\n'+c.addr+(c.pan?'\nPAN: '+c.pan:'')+(c.gstin?'\nGSTIN: '+c.gstin:'')+
-    '\n\n'+inv.reg+'\nGrand Total: '+fmtINR(inv.amt)+'\nIn words: Rupees '+words(inv.amt)+' Only'+
-    '\n\nBank: '+f.bank+(f.branch?', '+f.branch:'')+'\nA/C: '+f.acc+' ('+f.type+')\nIFSC: '+f.ifsc;
-  if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(t).then(function(){toast('Copied')},function(){fb(t)})}else fb(t);
-};
-function fb(t){var ta=document.createElement('textarea');ta.value=t;document.body.appendChild(ta);ta.select();
-  try{document.execCommand('copy');toast('Copied')}catch(e){toast('Copy not available')}document.body.removeChild(ta)}
-var tt;function toast(m){var el=$('toast');el.textContent=m;el.classList.add('show');clearTimeout(tt);tt=setTimeout(function(){el.classList.remove('show')},1700)}
-
-loadFrom();go('home');
-</script>
+<script src="app.js" defer></script>
 
 </body>
 </html>
