@@ -7,7 +7,7 @@
   if(window.jspdf?.jsPDF)return Promise.resolve(window.jspdf.jsPDF);
   if(!loading)loading=new Promise((resolve,reject)=>{
    const tag=document.createElement('script');
-   tag.src='https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js';
+   tag.src='https://cdn.jsdelivr.net/npm/jspdf@4.2.1/dist/jspdf.umd.min.js';
    tag.crossOrigin='anonymous';
    tag.onload=()=>window.jspdf?.jsPDF?resolve(window.jspdf.jsPDF):reject(Error('PDF library unavailable'));
    tag.onerror=()=>reject(Error('Could not load PDF library'));
@@ -36,12 +36,16 @@
    const size=options.size||10;
    const maxWidth=options.width||170;
    const lines=doc.splitTextToSize(safe(value||'-'),maxWidth);
-   const h=lines.length*(size*0.44+1);
-   pageBreak(h+12);
+   pageBreak(15);
    doc.setFont('helvetica','bold');doc.setFontSize(8);doc.setTextColor(135,103,48);
    doc.text(label.toUpperCase(),left,y);y+=5;
    doc.setFont('helvetica','normal');doc.setFontSize(size);doc.setTextColor(28,26,24);
-   doc.text(lines,left,y);y+=h+5;
+   const advance=size*0.44+1;
+   for(const row of lines){
+    pageBreak(advance+2);
+    doc.text(row,left,y);y+=advance;
+   }
+   y+=5;
   }
   doc.setFillColor(124,29,43);doc.rect(0,0,210,5,'F');
   doc.setFillColor(168,132,47);doc.rect(0,5,210,1.5,'F');
