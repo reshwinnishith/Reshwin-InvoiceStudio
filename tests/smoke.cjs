@@ -68,4 +68,12 @@ assert.equal(run("view"),'generate');
 assert.equal(get('g_reg').value,'Performance');
 assert.equal(run("editingInvoice"),null);
 
-console.log('PASS: calculations, validation, persistence, immutable issued invoices, status flow, and duplication');
+// Failed browser storage must not create phantom saved invoices.
+const beforeCount=run("state.invoices.length"),beforeSeq=run("state.seq");
+run("localStorage.setItem=()=>{throw Error('storage full')}");
+get('g_amt').value='1800.00';get('g_date').value='2026-11-20';
+run("submitInvoice()");
+assert.equal(run("state.invoices.length"),beforeCount);
+assert.equal(run("state.seq"),beforeSeq);
+assert.equal(run("storageOK"),false);
+console.log('PASS: calculations, validation, persistence, immutable issued invoices, status flow, duplication, storage failures');
