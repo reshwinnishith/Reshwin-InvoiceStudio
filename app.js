@@ -81,7 +81,7 @@ function saveDetails(){
  if(f.ifsc&&!/^[A-Z]{4}0[A-Z0-9]{6}$/.test(f.ifsc.toUpperCase())){toast('Check IFSC format');return;}
  f.ifsc=f.ifsc.toUpperCase();
  if(f.acc&&!/^\d{6,20}$/.test(f.acc)){toast('Check bank account number');return;}
- state.from=f;if(!save())return;dirty=false;toast('Details saved');back();
+ const previous=state.from;state.from=f;if(!save()){state.from=previous;return;}dirty=false;toast('Details saved');back();
 }
 function renderClients(){
  const box=$('clientList');box.innerHTML='';
@@ -116,16 +116,17 @@ function saveClient(){
  if(c.pan&&!/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(c.pan)){toast('Check client PAN');return;}
  if(c.gstin&&!/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][0-9A-Z]Z[0-9A-Z]$/.test(c.gstin)){toast('Check GSTIN');return;}
  if(c.pan&&c.gstin&&c.gstin.slice(2,12)!==c.pan){toast('Client GSTIN must match client PAN');return;}
+ const previous=state.clients.map(client=>({...client}));
  if(editingClient){const i=state.clients.findIndex(x=>x.id===editingClient);if(i<0)return;state.clients[i]={...state.clients[i],...c};}
  else {editingClient=id();state.clients.push({id:editingClient,...c});}
- if(!save())return;dirty=false;
+ if(!save()){state.clients=previous;return;}dirty=false;
  history=['home'];
  view='clients';VIEWS.forEach(v=>{$('v-'+v).hidden=v!==view});renderBar();renderClients();window.scrollTo(0,0);toast('Client saved');
 }
 function deleteClient(){
  const i=state.clients.findIndex(x=>x.id===editingClient);if(i<0)return;
  if(!confirm('Remove this client? Existing invoices will remain unchanged.'))return;
- state.clients.splice(i,1);if(!save())return;dirty=false;history=[];
+ const removed=state.clients[i];state.clients.splice(i,1);if(!save()){state.clients.splice(i,0,removed);return;}dirty=false;history=[];
  go('clients',{replace:true});toast('Client removed');
 }
 function renderInvoices(){
@@ -185,8 +186,9 @@ function submitInvoice(){
  if(old && invoiceStatus(old)!=='draft'){toast('Issued invoices cannot be edited. Duplicate to make a correction.');return;}
  const number=old?.no||('RESH-'+date.slice(0,4)+'-'+String(state.seq).padStart(3,'0'));
  const inv={id:old?.id||id(),no:number,date,clientId:client.id,client:{...client},from:{...state.from},reg,amountPaise,taxRate,taxPaise,totalPaise:amountPaise+taxPaise,status:'draft',createdAt:old?.createdAt||new Date().toISOString(),updatedAt:new Date().toISOString()};
+ const before={invoices:state.invoices.slice(),seq:state.seq};
  if(old){state.invoices[state.invoices.indexOf(old)]=inv;}else{state.invoices.unshift(inv);state.seq++;}
- if(!save())return;
+ if(!save()){state.invoices=before.invoices;state.seq=before.seq;return;}
  dirty=false;editingInvoice=null;history=['home'];viewingInvoice=inv.id;go('invoice',{replace:true});toast('Invoice saved');
 }
 const ONES=['','One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten','Eleven','Twelve','Thirteen','Fourteen','Fifteen','Sixteen','Seventeen','Eighteen','Nineteen'];
