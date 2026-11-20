@@ -1,6 +1,7 @@
 'use strict';
 /* Reshwin Invoice Studio — local-first, no accounts or external data transfers. */
 const STORAGE_KEY = 'reshwin-invoice-studio-v2';
+const ISSUED_STATUSES = ['issued','paid','void'];
 const $ = id => document.getElementById(id);
 const today = () => { const d=new Date();return [d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-'); };
 const blankFrom = () => ({name:'',addr:'',pan:'',type:'',bank:'',branch:'',acc:'',ifsc:''});
@@ -77,6 +78,9 @@ function saveDetails(){
  if(!f.name||!f.addr){toast('Enter your name and address');return;}
  if(f.pan&&!/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(f.pan.toUpperCase())){toast('Check the PAN format');return;}
  f.pan=f.pan.toUpperCase();
+ if(f.ifsc&&!/^[A-Z]{4}0[A-Z0-9]{6}$/.test(f.ifsc.toUpperCase())){toast('Check IFSC format');return;}
+ f.ifsc=f.ifsc.toUpperCase();
+ if(f.acc&&!/^\d{6,20}$/.test(f.acc)){toast('Check bank account number');return;}
  state.from=f;if(!save())return;dirty=false;toast('Details saved');back();
 }
 function renderClients(){
@@ -111,6 +115,7 @@ function saveClient(){
  c.pan=c.pan.toUpperCase();c.gstin=c.gstin.toUpperCase();
  if(c.pan&&!/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(c.pan)){toast('Check client PAN');return;}
  if(c.gstin&&!/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][0-9A-Z]Z[0-9A-Z]$/.test(c.gstin)){toast('Check GSTIN');return;}
+ if(c.pan&&c.gstin&&c.gstin.slice(2,12)!==c.pan){toast('Client GSTIN must match client PAN');return;}
  if(editingClient){const i=state.clients.findIndex(x=>x.id===editingClient);if(i<0)return;state.clients[i]={...state.clients[i],...c};}
  else {editingClient=id();state.clients.push({id:editingClient,...c});}
  if(!save())return;dirty=false;
@@ -153,6 +158,7 @@ function fillClients(selected){
 function openInvoiceEditor(invoiceId=null){
  editingInvoice=invoiceId;
  const inv=state.invoices.find(x=>x.id===invoiceId);
+ if(inv && invoiceStatus(inv)!=='draft'){toast('Issued invoices cannot be edited');return;}
  fillClients(inv?.clientId);
  $('g_reg').value=inv?.reg||'';
  $('g_amt').value=inv?(inv.amountPaise/100).toFixed(2):'';
@@ -176,8 +182,9 @@ function submitInvoice(){
  const taxPaise=Math.round(amountPaise*taxRate/100);
  if(taxRate>0&&!confirm('Confirm you are entitled to charge GST at the selected rate. The app does not determine your GST obligations.'))return;
  const old=state.invoices.find(x=>x.id===editingInvoice);
+ if(old && invoiceStatus(old)!=='draft'){toast('Issued invoices cannot be edited. Duplicate to make a correction.');return;}
  const number=old?.no||('RESH-'+date.slice(0,4)+'-'+String(state.seq).padStart(3,'0'));
- const inv={id:old?.id||id(),no:number,date,clientId:client.id,client:{...client},from:{...state.from},reg,amountPaise,taxRate,taxPaise,totalPaise:amountPaise+taxPaise};
+ const inv={id:old?.id||id(),no:number,date,clientId:client.id,client:{...client},from:{...state.from},reg,amountPaise,taxRate,taxPaise,totalPaise:amountPaise+taxPaise,status:'draft',createdAt:old?.createdAt||new Date().toISOString(),updatedAt:new Date().toISOString()};
  if(old){state.invoices[state.invoices.indexOf(old)]=inv;}else{state.invoices.unshift(inv);state.seq++;}
  if(!save())return;
  dirty=false;editingInvoice=null;history=['home'];viewingInvoice=inv.id;go('invoice',{replace:true});toast('Invoice saved');
@@ -193,6 +200,36 @@ function words(n){
  }return parts.join(' ');
 }
 function amountWords(paise){const rupees=Math.floor(paise/100),p=paise%100;return 'Rupees '+words(rupees)+(p?' and '+words(p)+' Paise':'')+' Only';}
+function invoiceStatus(inv){return ['draft','issued','paid','void'].includes(inv?.status)?inv.status:'issued';}
+function updateInvoiceStatus(status){
+ const inv=state.invoices.find(x=>x.id===viewingInvoice);
+ if(!inv)return;
+ const old=invoiceStatus(inv);
+ const valid={draft:['issued'],issued:['paid','void'],paid:[],void:[]};
+ if(!valid[old].includes(status)){toast('This status change is not allowed');return;}
+ const message=status==='issued'?'Issue this invoice? After issuing it, its details cannot be edited.':status==='paid'?'Mark this invoice as paid?':'Void this invoice? Its original record will remain for your records.';
+ if(!confirm(message))return;
+ const previous={...inv};
+ inv.status=status;inv.updatedAt=new Date().toISOString();
+ if(status==='issued')inv.issuedAt=inv.updatedAt;
+ if(status==='paid')inv.paidAt=inv.updatedAt;
+ if(status==='void')inv.voidedAt=inv.updatedAt;
+ if(!save()){Object.assign(inv,previous);return;}
+ renderInvoice(inv.id);toast('Invoice marked '+status);
+}
+function duplicateInvoice(){
+ const inv=state.invoices.find(x=>x.id===viewingInvoice);
+ if(!inv)return;
+ editingInvoice=null;
+ fillClients(inv.clientId);
+ $('g_reg').value=inv.reg||'';
+ $('g_amt').value=(inv.amountPaise/100).toFixed(2);
+ $('g_date').value=today();
+ $('g_tax').value=String(inv.taxRate??0);
+ $('g_heading').textContent='Duplicate invoice';
+ $('g_go').textContent='Create draft';
+ dirty=false;go('generate');
+}
 function showInvoice(invoiceId){
  viewingInvoice=invoiceId;go('invoice');
 }
@@ -200,9 +237,15 @@ function renderInvoice(invoiceId){
  const inv=state.invoices.find(x=>x.id===invoiceId);
  if(!inv)return;
  const f=inv.from||blankFrom(),c=inv.client||{},subtotal=inv.amountPaise||0,tax=inv.taxPaise||0,total=inv.totalPaise??subtotal;
+ const status=invoiceStatus(inv);
+ $('invoiceStatus').textContent=status.charAt(0).toUpperCase()+status.slice(1);
+ $('editInv').hidden=status!=='draft';
+ $('issueInv').hidden=status!=='draft';
+ $('paidInv').hidden=status!=='issued';
+ $('voidInv').hidden=status!=='issued';
  const ctax=(c.pan?'<div><span class="k">PAN </span>'+esc(c.pan)+'</div>':'')+(c.gstin?'<div><span class="k">GSTIN </span>'+esc(c.gstin)+'</div>':'');
  $('paper').innerHTML=
- '<div class="p-top"></div><div class="p-title">Invoice</div>'+
+ '<div class="p-top"></div><div class="p-title">Invoice'+(status==='draft'?' — Draft':status==='void'?' — Void':'')+'</div>'+
  '<div class="p-meta"><div><div class="p-ek">Invoice No.</div><div class="p-ev">'+esc(inv.no)+'</div></div><div><div class="p-ek">Invoice Date</div><div class="p-ev">'+dateLabel(inv.date)+'</div></div></div>'+
  '<div class="p-parties"><div><div class="p-lbl">From</div><div class="p-nm">'+esc(f.name)+'</div><div class="p-ad">'+esc(f.addr)+'</div>'+(f.pan?'<div class="p-tax">PAN '+esc(f.pan)+'</div>':'')+'</div>'+
  '<div><div class="p-lbl">Invoice To</div><div class="p-nm">'+esc(c.name)+'</div><div class="p-ad">'+esc(c.addr)+'</div><div class="p-tax">'+ctax+'</div></div></div>'+
@@ -261,7 +304,21 @@ $('ce_delete').onclick=deleteClient;
 $('g_go').onclick=submitInvoice;
 $('newInv').onclick=()=>openInvoiceEditor();
 $('editInv').onclick=()=>openInvoiceEditor(viewingInvoice);
-$('dl').onclick=()=>{const t=document.title;const inv=state.invoices.find(x=>x.id===viewingInvoice);document.title=inv?.no||'Invoice';window.print();setTimeout(()=>document.title=t,1000);};
+$('issueInv').onclick=()=>updateInvoiceStatus('issued');
+$('paidInv').onclick=()=>updateInvoiceStatus('paid');
+$('voidInv').onclick=()=>updateInvoiceStatus('void');
+$('duplicateInv').onclick=duplicateInvoice;
+$('dl').onclick=async()=>{
+ const inv=state.invoices.find(x=>x.id===viewingInvoice);if(!inv)return;
+ $('dl').disabled=true;
+ try{await window.InvoicePDF.download(inv,{money,dateLabel,amountWords,invoiceStatus});toast('PDF downloaded');}
+ catch(e){console.error('PDF download failed',e);toast('PDF unavailable. Use Print / Save as PDF.');}
+ finally{$('dl').disabled=false;}
+};
+$('printInv').onclick=()=>{
+ const t=document.title,inv=state.invoices.find(x=>x.id===viewingInvoice);
+ document.title=inv?.no||'Invoice';window.print();setTimeout(()=>document.title=t,1000);
+};
 $('copy').onclick=copyInvoice;
 $('exportBackup').onclick=exportBackup;
 $('importBackup').onclick=()=>$('backupFile').click();
