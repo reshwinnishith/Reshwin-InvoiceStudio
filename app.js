@@ -156,9 +156,9 @@ function fillClients(selected){
  $('g_go').disabled=false;if(selected&&state.clients.some(c=>c.id===selected))s.value=selected;
 }
 function openInvoiceEditor(invoiceId=null){
- editingInvoice=invoiceId;
  const inv=state.invoices.find(x=>x.id===invoiceId);
  if(inv && invoiceStatus(inv)!=='draft'){toast('Issued invoices cannot be edited');return;}
+ editingInvoice=invoiceId;
  fillClients(inv?.clientId);
  $('g_reg').value=inv?.reg||'';
  $('g_amt').value=inv?(inv.amountPaise/100).toFixed(2):'';
