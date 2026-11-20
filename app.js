@@ -43,7 +43,7 @@ function go(next,{replace=false}={}){
  if(view==='home')renderInvoices();
  if(view==='clients')renderClients();
  if(view==='invoice'){renderInvoice(viewingInvoice);requestAnimationFrame(scalePaper);}
- window.scrollTo({top:0,behavior:'instant'});
+ window.scrollTo(0,0);
 }
 function back(){
  if(!checkLeave())return;
@@ -52,7 +52,7 @@ function back(){
  if(view==='home')renderInvoices();
  if(view==='clients')renderClients();
  if(view==='invoice')renderInvoice(viewingInvoice);
- window.scrollTo({top:0,behavior:'instant'});
+ window.scrollTo(0,0);
 }
 function renderBar(){
  const bar=$('bar');
@@ -114,7 +114,7 @@ function saveClient(){
  if(editingClient){const i=state.clients.findIndex(x=>x.id===editingClient);if(i<0)return;state.clients[i]={...state.clients[i],...c};}
  else {editingClient=id();state.clients.push({id:editingClient,...c});}
  if(!save())return;dirty=false;
- history=history.filter(v=>v!=='client-edit');
+ history=['home'];
  view='clients';VIEWS.forEach(v=>{$('v-'+v).hidden=v!==view});renderBar();renderClients();window.scrollTo(0,0);toast('Client saved');
 }
 function deleteClient(){
@@ -267,5 +267,9 @@ $('exportBackup').onclick=exportBackup;
 $('importBackup').onclick=()=>$('backupFile').click();
 $('backupFile').onchange=e=>{importBackup(e.target.files?.[0]);e.target.value='';};
 wireDirty('v-details');wireDirty('v-client-edit');wireDirty('v-generate');
+document.addEventListener('pointerdown',e=>{
+ if(e.target?.closest?.('input,textarea,select,button,a,label'))return;
+ if(document.activeElement?.matches?.('input,textarea,select'))document.activeElement.blur();
+});
 load();go('home',{replace:true});
 if(!storageOK)toast('Browser storage unavailable. Your changes may not survive refresh.');
