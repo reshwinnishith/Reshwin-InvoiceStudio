@@ -25,7 +25,10 @@ page.on('response', r => { if (r.status() >= 400) failedRequests.push(r.status()
 page.on('dialog', d => d.accept());
 // page.waitForFunction evaluates strings and is blocked by our strict CSP; poll with evaluate() (CDP) instead.
 async function waitFor(fn, arg, { timeout = 15000 } = {}) { const end = Date.now() + timeout; while (Date.now() < end) { if (await page.evaluate(fn, arg)) return; await page.waitForTimeout(100); } throw new Error('timeout waiting for ' + fn.toString().slice(0, 90)); }
-const shot = n => page.screenshot({ path: `${out}/${n}.png` });
+await page.addInitScript(() => { window.__shared = []; window.__shareMode = 'ok';
+  navigator.canShare = d => !!(d && d.files && d.files.length);
+  navigator.share = async d => { if (window.__shareMode === 'cancel') throw new DOMException('cancelled', 'AbortError'); window.__shared.push({ name: d.files[0].name, type: d.files[0].type, size: d.files[0].size }); }; });
+const shot = async n => { await page.waitForTimeout(350); return page.screenshot({ path: `${out}/${n}.png` }); };
 const visible = async () => page.evaluate(() => [...document.querySelectorAll('section[id^=v-]')].filter(s => !s.hidden).map(s => s.id));
 const email = `fictional-e2e-${Date.now()}@example.test`, pass = 'Fictional-Pass-1234';
 async function verifyEmail(e) {
@@ -50,10 +53,35 @@ try {
   await waitFor(() => document.querySelectorAll('#clientList .clientrow').length === 1); ok('client saved and listed', true); await shot('06-clients');
   await page.click('#backBtn').catch(() => {}); await page.goto('http://127.0.0.1:5173/?emulator=1'); await page.waitForSelector('#v-home:not([hidden])', { timeout: 20000 });
   ok('session restored after full reload (no re-login)', true);
-  await page.click('#fab'); await page.selectOption('#g_client', { index: 0 }); await page.fill('#g_reg', 'Fictional design services'); await page.fill('#g_amt', '25000.50'); await page.selectOption('#g_tax', '0'); await page.click('#g_go');
+  const t0 = Date.now(); await page.click('#fab');
+  ok('FAB: the + is rotating (spin class) right after the tap', await page.evaluate(() => document.getElementById('fab').classList.contains('spin') || !document.getElementById('v-generate').hidden));
+  await page.waitForSelector('#v-generate:not([hidden])'); const dt = Date.now() - t0; ok('FAB: editor opens after a short animation (<= 700 ms incl. test overhead)', dt <= 700, dt + ' ms');
+  ok('FAB: spin class is cleared after opening', await page.evaluate(() => !document.getElementById('fab').classList.contains('spin')));
+  await page.selectOption('#g_client', { index: 0 }); await page.fill('#g_reg', 'Fictional design services'); await page.fill('#g_amt', '25000.50'); await page.selectOption('#g_tax', '0'); await page.click('#g_go');
   await waitFor(() => document.getElementById('invoiceStatus').textContent === 'Draft'); await page.waitForSelector('#paper .p-nm'); ok('draft created, no number yet', /Assigned when issued/.test(await page.textContent('#paper'))); await shot('07-draft');
-  await page.click('#issueInv'); await waitFor(() => /RESH-\d{4}-001/.test(document.getElementById('paper').textContent));
+  await page.click('#issueInv'); await page.waitForSelector('#issueSheet:not([hidden])', { timeout: 20000 });
+  ok('issued: success sheet shows RESH-YYYY-001 only after the server confirmed', /RESH-\d{4}-001/.test(await page.textContent('#is_num'))); await shot('08-issued-sheet');
+  ok('issued: sheet offers Share PDF, Download PDF, Copy text and Done', await page.evaluate(() => ['is_share', 'is_dl', 'is_copy', 'is_done'].every(i => document.getElementById(i) && !document.getElementById(i).closest('[hidden]'))));
+  await page.click('#is_share'); await waitFor(() => window.__shared.length === 1); const shared = await page.evaluate(() => window.__shared[0]);
+  ok('Share PDF hands the native share sheet a real PDF file', shared.type === 'application/pdf' && /^RESH-\d{4}-001\.pdf$/.test(shared.name) && shared.size > 2000, shared.name + ' ' + shared.size + 'B');
+  await page.evaluate(() => { window.__shareMode = 'cancel'; }); await page.click('#is_share'); await page.waitForTimeout(600);
+  ok('a dismissed share sheet changes nothing (sheet stays, no error)', (await page.isVisible('#issueSheet')) && !/unavailable|error/i.test(await page.textContent('#toast')));
+  await page.evaluate(() => { window.__shareMode = 'ok'; });
+  const [dl0] = await Promise.all([page.waitForEvent('download', { timeout: 30000 }).catch(() => null), page.click('#is_dl')]); ok('Download PDF from the success sheet saves the PDF', !!dl0 && /\.pdf$/.test(dl0.suggestedFilename()));
+  await page.click('#is_done'); await waitFor(() => document.getElementById('issueSheet').hidden); await waitFor(() => /RESH-\d{4}-001/.test(document.getElementById('paper').textContent));
   ok('issued with RESH-YYYY-001 number', true); await shot('08-issued');
+  ok('issued invoice shows Share PDF + Download PDF as the prominent actions', await page.evaluate(() => !document.getElementById('shareInv').hidden && !document.getElementById('dl').hidden && document.getElementById('issueInv').hidden));
+  // ---- home filters ----
+  await page.click('#backBtn').catch(() => {}); await page.waitForSelector('#v-home:not([hidden])');
+  await page.click('#fab'); await page.waitForSelector('#v-generate:not([hidden])'); await page.selectOption('#g_client', { index: 0 }); await page.fill('#g_reg', 'Fictional second job'); await page.fill('#g_amt', '300'); await page.selectOption('#g_tax', '0'); await page.click('#g_go'); await page.waitForSelector('#paper .p-nm');
+  await page.click('#backBtn').catch(() => {}); await page.waitForSelector('#v-home:not([hidden])'); await waitFor(() => document.querySelectorAll('#iblist .inv').length === 2);
+  const counts = await page.evaluate(() => ['all', 'drafts', 'issued'].map(k => document.getElementById('n_' + k).textContent).join(','));
+  ok('filters: counts are All 2, Drafts 1, Issued 1', counts === '2,1,1', counts);
+  await page.click('#flt_drafts'); ok('filters: Drafts shows only the draft (no number)', await page.evaluate(() => document.querySelectorAll('#iblist .inv').length === 1 && document.querySelector('#iblist .inv .num').textContent.trim() === 'Draft'));
+  await page.click('#flt_issued'); ok('filters: Issued shows the issued invoice with its number and status', await page.evaluate(() => document.querySelectorAll('#iblist .inv').length === 1 && /RESH-\d{4}-001/.test(document.querySelector('#iblist .inv .num').textContent) && /Issued/.test(document.querySelector('#iblist .inv .st').textContent)));
+  await shot('08b-home-issued-filter'); await page.click('#flt_all'); await shot('08c-home-all');
+  ok('filters: tabs expose selected state to assistive tech', await page.evaluate(() => document.getElementById('flt_all').getAttribute('aria-selected') === 'true' && document.getElementById('flt_drafts').getAttribute('aria-selected') === 'false'));
+  await page.click('#iblist .inv >> nth=1'); await page.waitForSelector('#paper .p-nm');
   // PDF
   const [dl] = await Promise.all([page.waitForEvent('download', { timeout: 30000 }).catch(e => null), page.click('#dl')]);
   ok('PDF download produced a file', !!dl, dl ? dl.suggestedFilename() : 'no download (jsPDF CDN?)');
@@ -74,6 +102,14 @@ try {
   await page.click('#setBtn'); await sweep('settings'); await page.click('#backBtn');
   const focusOk = await (async () => { await page.click('#setBtn'); return page.evaluate(() => document.activeElement && document.activeElement.tagName === 'H2'); })();
   ok('accessibility: focus moves to the new screen heading on navigation', focusOk);
+  await page.click('#backBtn'); await page.emulateMedia({ reducedMotion: 'reduce' }); await page.click('#fab');
+  ok('reduced motion: the editor opens immediately, no spin delay', await page.evaluate(() => !document.getElementById('v-generate').hidden && !document.getElementById('fab').classList.contains('spin')));
+  await page.emulateMedia({ reducedMotion: 'no-preference' }); await page.click('#backBtn');
+  // Saved values are real values, not placeholders
+  await page.click('#navDetails'); const det = await page.evaluate(() => ({ name: document.getElementById('f_name').value, bank: document.getElementById('f_bank').value, branchPh: document.getElementById('f_branch').placeholder, saved: !document.getElementById('f_saved').hidden, hint: document.getElementById('f_hint').hidden }));
+  ok('details: saved fields show their saved values; hint hidden and "Saved" shown', det.name === 'Fictional Sender' && det.bank === 'Fictional Bank' && det.saved && det.hint, JSON.stringify({ n: det.name, b: det.bank }));
+  ok('details: empty-field placeholders are generic hints, never sample bank data', /^e\.g\./.test(det.branchPh) && !/HDFC|Shenoy/.test(await page.content()));
+  await shot('17-details-saved'); await page.click('#backBtn');
   await page.setViewportSize({ width: 390, height: 844 });
   await page.evaluate(() => { window.__marker = 'private-page-state'; });
   // settings, sign out
