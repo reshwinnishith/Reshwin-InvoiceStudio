@@ -1,19 +1,176 @@
+// Invoice Studio V2 rules. NOT DEPLOYED — verified only against the local emulator.
+// Production Firestore keeps its separately approved deny-all ruleset until a release approval.
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    function signedIn() {
-      return request.auth != null;
+    function owner(uid) {
+      return request.auth != null && request.auth.uid == uid
+        && request.auth.token.email_verified == true
+        && request.auth.token.firebase.sign_in_provider == 'password';
     }
-
-    // One account owns exactly one private workspace.
-    // All documents below users/{uid} are private to that Firebase Auth uid.
+    function text(v, min, max) {
+      return v is string && v.size() <= max && (min == 0 || v.trim().size() >= min);
+    }
+    function safeId(v) {
+      return v is string && v.matches('^[A-Za-z0-9_-]{1,128}$');
+    }
+    function exact(d, keys) {
+      return d.keys().hasAll(keys) && d.keys().hasOnly(keys);
+    }
+    function base(d, uid) {
+      return d.ownerUid == uid && d.schemaVersion is int && d.schemaVersion == 1
+        && d.createdAt is timestamp && d.updatedAt == request.time;
+    }
+    function timestamps() {
+      return request.resource.data.createdAt == resource.data.createdAt;
+    }
+    function validClient(d) {
+      return text(d.name, 1, 200) && text(d.address, 0, 2000)
+        && (d.pan == '' || d.pan.matches('^[A-Z]{5}[0-9]{4}[A-Z]$'))
+        && (d.gstin == '' || d.gstin.matches('^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][0-9A-Z]Z[0-9A-Z]$'))
+        && (d.pan == '' || d.gstin == '' || d.gstin.matches('^[0-9]{2}' + d.pan + '[0-9A-Z]Z[0-9A-Z]$'));
+    }
+    function validSender(d) {
+      return text(d.name, 1, 200) && text(d.address, 1, 2000)
+        && (d.pan == '' || d.pan.matches('^[A-Z]{5}[0-9]{4}[A-Z]$'))
+        && text(d.bankName, 0, 200) && text(d.bankBranch, 0, 200)
+        && (d.accountNumber == '' || d.accountNumber.matches('^[0-9]{6,20}$'))
+        && text(d.accountType, 0, 40)
+        && (d.ifsc == '' || d.ifsc.matches('^[A-Z]{4}0[A-Z0-9]{6}$'));
+    }
+    function validMoney(d) {
+      // Integer paise, bounded below 64-bit multiplication overflow. Half-up tax.
+      return d.amountPaise is int && d.amountPaise > 0 && d.amountPaise <= 10000000000
+        && d.taxRate is int && d.taxRate in [0, 5, 12, 18, 28]
+        && d.taxPaise is int && d.taxPaise >= 0
+        && d.taxPaise * 100 <= d.amountPaise * d.taxRate + 50
+        && d.taxPaise * 100 > d.amountPaise * d.taxRate - 50
+        && d.totalPaise is int && d.totalPaise == d.amountPaise + d.taxPaise;
+    }
+    function padSeq(n) {
+      return n < 10 ? '00' + string(n) : (n < 100 ? '0' + string(n) : string(n));
+    }
+    function validDateParts(parts) {
+      let year = int(parts[0]);
+      let month = int(parts[1]);
+      let day = int(parts[2]);
+      let leap = year % 400 == 0 || (year % 4 == 0 && year % 100 != 0);
+      return year > 0 && month >= 1 && month <= 12 && day >= 1
+        && day <= (month == 2 ? (leap ? 29 : 28) : (month in [4, 6, 9, 11] ? 30 : 31));
+    }
+    function validDate(value) {
+      return value is string && value.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && validDateParts(value.split('-'));
+    }
+    function validInvoice(d, uid) {
+      return exact(d, ['schemaVersion', 'ownerUid', 'status', 'sequence', 'number',
+          'date', 'currency', 'description', 'clientId', 'clientSnapshot',
+          'senderSnapshot', 'amountPaise', 'taxRate', 'taxPaise', 'totalPaise',
+          'createdAt', 'updatedAt', 'issuedAt', 'paidAt', 'voidedAt'])
+        && base(d, uid) && d.currency == 'INR'
+        && text(d.description, 1, 4000) && safeId(d.clientId)
+        && validDate(d.date)
+        && d.clientSnapshot is map && exact(d.clientSnapshot, ['name', 'address', 'pan', 'gstin'])
+        && validClient(d.clientSnapshot)
+        && d.senderSnapshot is map && exact(d.senderSnapshot,
+          ['name', 'address', 'pan', 'bankName', 'bankBranch', 'accountNumber', 'accountType', 'ifsc'])
+        && validSender(d.senderSnapshot) && validMoney(d)
+        && d.sequence is int && d.sequence >= 0 && d.sequence <= 999999999
+        && ((d.status == 'draft' && d.sequence == 0 && d.number == ''
+              && d.issuedAt == null && d.paidAt == null && d.voidedAt == null)
+          || (d.status in ['issued', 'paid', 'void'] && d.sequence > 0
+              && d.number == 'RESH-' + d.date.split('-')[0] + '-' + padSeq(d.sequence) && d.issuedAt is timestamp
+              && d.issuedAt >= d.createdAt && d.issuedAt <= request.time
+              && ((d.status == 'issued' && d.paidAt == null && d.voidedAt == null)
+                || (d.status == 'paid' && d.paidAt is timestamp && d.paidAt >= d.issuedAt
+                    && d.paidAt <= request.time && d.voidedAt == null)
+                || (d.status == 'void' && d.voidedAt is timestamp && d.voidedAt >= d.issuedAt
+                    && d.voidedAt <= request.time && d.paidAt == null))));
+    }
+    function counterPath(uid) {
+      return /databases/$(database)/documents/users/$(uid)/counters/invoices;
+    }
+    function invoicePath(uid, invoiceId) {
+      return /databases/$(database)/documents/users/$(uid)/invoices/$(invoiceId);
+    }
+    function previousCounter(uid) {
+      return exists(counterPath(uid)) ? get(counterPath(uid)).data.lastValue : 0;
+    }
+    function issuedWithCounter(uid, invoiceId, d) {
+      let after = getAfter(counterPath(uid)).data;
+      return d.sequence == previousCounter(uid) + 1
+        && after.lastValue == d.sequence && after.lastInvoiceId == invoiceId;
+    }
+    function validCounter(d, uid) {
+      let before = get(invoicePath(uid, d.lastInvoiceId)).data;
+      let after = getAfter(invoicePath(uid, d.lastInvoiceId)).data;
+      return exact(d, ['ownerUid', 'lastValue', 'lastInvoiceId', 'updatedAt'])
+        && d.ownerUid == uid && d.updatedAt == request.time && safeId(d.lastInvoiceId)
+        && d.lastValue is int && d.lastValue > 0 && d.lastValue <= 999999999
+        && d.lastValue == previousCounter(uid) + 1
+        && before.status == 'draft' && after.status == 'issued'
+        && after.sequence == d.lastValue && after.ownerUid == uid;
+    }
+    function invoiceUpdate(uid, invoiceId) {
+      let old = resource.data;
+      let d = request.resource.data;
+      let changed = d.diff(old).affectedKeys();
+      return timestamps() && (
+        (old.status == 'draft' && d.status == 'draft')
+        || (old.status == 'draft' && d.status == 'issued'
+          && changed.hasOnly(['status', 'sequence', 'number', 'issuedAt', 'updatedAt'])
+          && d.issuedAt == request.time && issuedWithCounter(uid, invoiceId, d))
+        || (old.status == 'issued' && d.status == 'paid'
+          && changed.hasOnly(['status', 'paidAt', 'updatedAt']) && d.paidAt == request.time)
+        || (old.status == 'issued' && d.status == 'void'
+          && changed.hasOnly(['status', 'voidedAt', 'updatedAt']) && d.voidedAt == request.time));
+    }
     match /users/{uid} {
-      allow read, write: if signedIn() && request.auth.uid == uid;
-      match /{document=**} {
-        allow read, write: if signedIn() && request.auth.uid == uid;
+      allow read: if owner(uid);
+      allow create: if owner(uid)
+        && exact(request.resource.data, ['ownerUid', 'schemaVersion', 'displayName', 'createdAt', 'updatedAt'])
+        && base(request.resource.data, uid) && request.resource.data.createdAt == request.time
+        && text(request.resource.data.displayName, 1, 200);
+      allow update: if owner(uid)
+        && exact(request.resource.data, ['ownerUid', 'schemaVersion', 'displayName', 'createdAt', 'updatedAt'])
+        && base(request.resource.data, uid) && timestamps()
+        && text(request.resource.data.displayName, 1, 200);
+      allow delete: if false;
+      match /clients/{clientId} {
+        allow read: if owner(uid);
+        allow create, update: if owner(uid) && safeId(clientId)
+          && exact(request.resource.data, ['ownerUid', 'schemaVersion', 'name', 'address', 'pan', 'gstin', 'createdAt', 'updatedAt'])
+          && base(request.resource.data, uid) && validClient(request.resource.data)
+          && ((resource == null && request.resource.data.createdAt == request.time)
+            || (resource != null && timestamps()));
+        allow delete: if owner(uid);
       }
+      match /settings/sender {
+        allow read: if owner(uid);
+        allow create, update: if owner(uid)
+          && exact(request.resource.data, ['ownerUid', 'schemaVersion', 'name', 'address', 'pan',
+            'bankName', 'bankBranch', 'accountNumber', 'accountType', 'ifsc', 'createdAt', 'updatedAt'])
+          && base(request.resource.data, uid) && validSender(request.resource.data)
+          && ((resource == null && request.resource.data.createdAt == request.time)
+            || (resource != null && timestamps()));
+        allow delete: if false;
+      }
+      match /invoices/{invoiceId} {
+        allow read: if owner(uid);
+        allow create: if owner(uid) && safeId(invoiceId) && validInvoice(request.resource.data, uid)
+          && request.resource.data.status == 'draft' && request.resource.data.createdAt == request.time;
+        allow update: if owner(uid) && safeId(invoiceId) && validInvoice(request.resource.data, uid)
+          && invoiceUpdate(uid, invoiceId);
+        allow delete: if owner(uid) && resource.data.status == 'draft';
+      }
+      match /counters/invoices {
+        allow read: if owner(uid);
+        allow create, update: if owner(uid) && validCounter(request.resource.data, uid);
+        allow delete: if false;
+      }
+      // Historical imports require a separately approved trusted importer and schema.
+      // No client import exception or catch-all user write grant is provided.
     }
-    // No access to any unrelated or accidental top-level collection.
     match /{document=**} {
       allow read, write: if false;
     }

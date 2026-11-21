@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#7c1d2b">
 <title>Reshwin Invoice Studio</title>
+<link rel="icon" href="data:,">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Inter:wght@400;500;600&family=DM+Mono:wght@400;500&display=swap">
 <style>
@@ -187,6 +188,74 @@ select{appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns=
 <div class="wrap">
   <div class="bar" id="bar"></div>
 
+
+  <!-- LOADING -->
+  <section id="v-loading" hidden>
+    <div class="panel authpanel" role="status" aria-live="polite">
+      <h2 id="ld_title">Opening Invoice Studio…</h2>
+      <p class="hint" id="ld_text">Checking your sign-in.</p>
+      <div class="actions"><button class="btn sec" id="ld_retry" hidden>Try again</button><button class="btn sec" id="ld_out" hidden>Sign out</button></div>
+    </div>
+  </section>
+
+  <!-- WELCOME / SIGN IN / CREATE ACCOUNT -->
+  <section id="v-welcome" hidden>
+    <div class="panel authpanel">
+      <h2 id="au_heading">Welcome back</h2>
+      <p class="hint" id="au_hint">Sign in to your private invoice workspace.</p>
+      <div class="seg" role="tablist" aria-label="Sign in or create account">
+        <button type="button" role="tab" id="au_tab_in" aria-selected="true">Sign in</button>
+        <button type="button" role="tab" id="au_tab_up" aria-selected="false">Create account</button>
+      </div>
+      <form id="au_form" novalidate>
+        <div class="form one">
+          <div class="f full"><label for="au_email">Email</label><input id="au_email" type="email" autocomplete="email" inputmode="email" autocapitalize="none" spellcheck="false" maxlength="254" required></div>
+          <div class="f full"><label for="au_pass">Password</label><input id="au_pass" type="password" autocomplete="current-password" maxlength="256" required><p class="field-help" id="au_pass_help" hidden>Use at least 8 characters. A longer phrase is stronger.</p></div>
+          <div class="f full" id="au_confirm_row" hidden><label for="au_pass2">Confirm password</label><input id="au_pass2" type="password" autocomplete="new-password" maxlength="256"></div>
+        </div>
+        <p class="msg" id="au_msg" role="alert" hidden></p>
+        <div class="actions"><button class="btn" id="au_submit" type="submit">Sign in</button><button class="linkbtn" id="au_forgot" type="button">Forgot password?</button></div>
+      </form>
+      <p class="note">Your invoices, clients and bank details are stored privately in your account and are never shared with other users. We will email you a link to verify your address before you can use the app.</p>
+    </div>
+  </section>
+
+  <!-- VERIFY EMAIL -->
+  <section id="v-verify" hidden>
+    <div class="panel authpanel">
+      <h2>Verify your email</h2>
+      <p class="hint">We sent a verification link to <strong id="vf_email"></strong>. Open it, then come back here.</p>
+      <p class="note">Can’t see it? Check spam or junk. The link may take a minute to arrive.</p>
+      <p class="msg" id="vf_msg" role="status" aria-live="polite" hidden></p>
+      <div class="actions"><button class="btn" id="vf_check">I’ve verified my email</button><button class="btn sec" id="vf_resend">Resend email</button></div>
+      <button class="linkbtn" id="vf_out">Use a different account</button>
+    </div>
+  </section>
+
+  <!-- RESET PASSWORD -->
+  <section id="v-reset" hidden>
+    <div class="panel authpanel">
+      <h2>Reset your password</h2>
+      <p class="hint">Enter your account email. If an account exists, we will send a reset link.</p>
+      <form id="rs_form" novalidate>
+        <div class="form one"><div class="f full"><label for="rs_email">Email</label><input id="rs_email" type="email" autocomplete="email" inputmode="email" autocapitalize="none" spellcheck="false" maxlength="254" required></div></div>
+        <p class="msg" id="rs_msg" role="status" aria-live="polite" hidden></p>
+        <div class="actions"><button class="btn" id="rs_submit" type="submit">Send reset link</button><button class="btn sec" id="rs_back" type="button">Back to sign in</button></div>
+      </form>
+    </div>
+  </section>
+
+  <!-- MIGRATE BROWSER DATA (preview only) -->
+  <section id="v-migrate" hidden>
+    <div class="panel">
+      <h2>Move browser data to your account</h2>
+      <p class="hint">This looks at invoices saved in this browser <em>before</em> accounts existed. Nothing is uploaded or changed here.</p>
+      <div id="mg_report"></div>
+      <div class="actions"><button class="btn sec" id="mg_backup" disabled>Download backup first</button><button class="btn" id="mg_import" disabled>Import to account</button></div>
+      <p class="note" id="mg_note"></p>
+    </div>
+  </section>
+
   <!-- HOME -->
   <section id="v-home">
     <div class="invoicebox">
@@ -212,7 +281,7 @@ select{appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns=
       <div class="hint">Pick a client, say what it was for, and the amount.</div>
       <div class="form">
         <div class="f full"><label>To (client)</label><select id="g_client"></select></div>
-        <div class="f full"><label>Regarding</label><input id="g_reg" placeholder="Live performance fee (Bass) at ..."></div>
+        <div class="f full"><label>Regarding</label><input id="g_reg" maxlength="4000" placeholder="Live performance fee (Bass) at ..."></div>
         <div class="f"><label>Amount (INR)</label><input id="g_amt" inputmode="numeric" placeholder="25000"></div>
         <div class="f"><label>Invoice date</label><input id="g_date" type="date"></div><div class="f full"><label for="g_tax">GST rate (only if applicable)</label><select id="g_tax"><option value="0">0% — no GST added</option><option value="5">5%</option><option value="12">12%</option><option value="18">18%</option><option value="28">28%</option></select><p class="field-help">Check with your accountant before charging GST. This app does not decide tax applicability.</p></div>
       </div>
@@ -225,7 +294,7 @@ select{appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns=
     <div class="stage" id="stage"><div class="paper" id="paper"></div></div>
     <div class="actions">
       <span id="invoiceStatus" class="status-pill" aria-live="polite"></span><button class="btn" id="dl">Download PDF</button><button class="btn sec" id="printInv">Print / Save as PDF</button><button class="btn sec" id="copy">Copy as text</button>
-      <button class="btn sec" id="editInv">Edit draft</button><button class="btn" id="issueInv">Issue invoice</button><button class="btn sec" id="paidInv">Mark paid</button><button class="btn sec" id="voidInv">Void invoice</button><button class="btn sec" id="duplicateInv">Duplicate</button><button class="btn sec" id="newInv">New invoice</button>
+      <button class="btn sec" id="editInv">Edit draft</button><button class="btn" id="issueInv">Issue invoice</button><button class="btn sec" id="paidInv">Mark paid</button><button class="btn sec" id="voidInv">Void invoice</button><button class="btn sec" id="duplicateInv">Duplicate</button><button class="btn sec" id="deleteInv">Delete draft</button><button class="btn sec" id="newInv">New invoice</button>
     </div>
     <div class="note">Download PDF generates an A4 file. If it fails, use Print / Save as PDF (choose A4, margins None).</div>
   </section>
@@ -236,14 +305,14 @@ select{appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns=
       <h2>Your details</h2>
       <div class="hint">Your sender details are saved in this browser. Existing invoices keep their original details.</div>
       <div class="form">
-        <div class="f full"><label>Name or business</label><input id="f_name"></div>
-        <div class="f full"><label>Address</label><textarea id="f_addr" rows="4"></textarea></div>
-        <div class="f"><label>PAN</label><input id="f_pan"></div>
-        <div class="f"><label>Account type</label><input id="f_type" placeholder="Savings"></div>
-        <div class="f"><label>Bank name</label><input id="f_bank" placeholder="HDFC Bank"></div>
-        <div class="f"><label>Branch</label><input id="f_branch" placeholder="Shenoy Nagar"></div>
-        <div class="f"><label>Account number</label><input id="f_acc"></div>
-        <div class="f"><label>IFSC</label><input id="f_ifsc"></div>
+        <div class="f full"><label>Name or business</label><input id="f_name" maxlength="200"></div>
+        <div class="f full"><label>Address</label><textarea id="f_addr" maxlength="2000" rows="4"></textarea></div>
+        <div class="f"><label>PAN</label><input id="f_pan" maxlength="10"></div>
+        <div class="f"><label>Account type</label><input id="f_type" maxlength="40" placeholder="Savings"></div>
+        <div class="f"><label>Bank name</label><input id="f_bank" maxlength="200" placeholder="HDFC Bank"></div>
+        <div class="f"><label>Branch</label><input id="f_branch" maxlength="200" placeholder="Shenoy Nagar"></div>
+        <div class="f"><label>Account number</label><input id="f_acc" maxlength="20"></div>
+        <div class="f"><label>IFSC</label><input id="f_ifsc" maxlength="11"></div>
       </div>
       <div class="actions"><button class="btn" id="f_save">Save details</button><span class="flash" id="f_flash" hidden>Saved</span></div>
     </div>
@@ -268,10 +337,10 @@ select{appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns=
       <h2 id="ce_title">Add Client</h2>
       <p class="hint">Enter the details you want to appear on an invoice.</p>
       <div class="form">
-        <div class="f full"><label for="ce_name">Client name</label><input id="ce_name" autocomplete="organization"></div>
-        <div class="f full"><label for="ce_addr">Address</label><textarea id="ce_addr" rows="4"></textarea></div>
-        <div class="f"><label for="ce_pan">PAN (optional)</label><input id="ce_pan" autocapitalize="characters"></div>
-        <div class="f"><label for="ce_gstin">GSTIN (optional)</label><input id="ce_gstin" autocapitalize="characters"></div>
+        <div class="f full"><label for="ce_name">Client name</label><input id="ce_name" maxlength="200" autocomplete="organization"></div>
+        <div class="f full"><label for="ce_addr">Address</label><textarea id="ce_addr" maxlength="2000" rows="4"></textarea></div>
+        <div class="f"><label for="ce_pan">PAN (optional)</label><input id="ce_pan" maxlength="10" autocapitalize="characters"></div>
+        <div class="f"><label for="ce_gstin">GSTIN (optional)</label><input id="ce_gstin" maxlength="15" autocapitalize="characters"></div>
       </div>
       <div class="actions"><button class="btn" id="ce_save">Save Client</button><button class="btn sec" id="ce_cancel">Cancel</button></div>
       <button class="destructive" id="ce_delete" hidden>Remove client</button>
@@ -282,17 +351,22 @@ select{appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns=
   <section id="v-settings" hidden>
     <div class="panel">
       <h2>Settings</h2>
-      <div class="hint">Your invoices and clients are stored only in this browser. Export a backup regularly.</div>
+      <div class="hint" id="set_account">Signed in.</div>
       <button class="setrow" id="setDetails"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg><span class="l">Your details</span><span class="ch"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></span></button>
       <button class="setrow" id="setClients"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="9" cy="8" r="3.4"/><path d="M2 20c0-3.5 3.3-5.5 7-5.5s7 2 7 5.5"/><path d="M16 5.2A3.4 3.4 0 0 1 16 11M22 20c0-2.8-1.8-4.6-4.3-5.2"/></svg><span class="l">Clients</span><span class="ch"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></span></button>
-      <div class="actions"><button class="btn sec" id="exportBackup">Export backup</button><button class="btn sec" id="importBackup">Restore backup</button><input type="file" id="backupFile" accept="application/json,.json" hidden></div><p class="note">Backups contain personal, client and bank details. Store them securely. Clearing browser data or using another device will not carry invoices across automatically.</p>
+      <div class="syncrow"><span class="dot" id="syncDot"></span><span id="syncText">Synced</span></div>
+      <div class="actions"><button class="btn sec" id="exportBackup">Export backup</button><button class="btn sec" id="openMigrate" hidden>Import browser data…</button><button class="btn sec" id="signOut">Sign out</button></div><p class="note">Backups contain personal, client and bank details. Store them securely. Your data lives in your account and syncs between your devices when you are signed in.</p>
     </div>
   </section>
 </div>
-<div class="toast" id="toast"></div>
+<div class="netbanner" id="netBanner" role="status" aria-live="polite" hidden></div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
 
+<script src="core.js" defer></script>
+<script src="firebase-config.js" defer></script>
 <script src="pdf.js" defer></script>
 <script src="app.js" defer></script>
+<script type="module" src="boot.mjs"></script>
 
 </body>
 </html>

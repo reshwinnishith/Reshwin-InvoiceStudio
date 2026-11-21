@@ -1,6 +1,6 @@
 # Reshwin Invoice Studio
 
-A lightweight, mobile-first invoice generator for personal use. No login, framework, server, build step or cloud storage.
+A lightweight, mobile-first invoice generator. V2 (in development) adds Firebase email/password accounts, verified email, private per-user cloud storage and transaction-safe invoice numbering — see [docs/FIREBASE-SETUP.md](docs/FIREBASE-SETUP.md). No build step.
 
 ## Use
 
@@ -10,25 +10,22 @@ Create invoices with the **+** button on Home. The invoice preview includes your
 
 ## Data and privacy
 
-Data is stored **only in your current browser** using localStorage. Invoices, clients and settings survive refreshes in that browser; they do **not** sync between browsers or devices. Clearing browser storage or using private browsing can erase them. Export a backup in Settings regularly, store it securely, and restore it from the same screen when needed.
+V2 stores each person's sender details, clients and invoices privately in Firestore under `users/{uid}`, available only to the signed-in, email-verified owner. Nothing is cached in the browser between sessions. Invoice records keep a frozen snapshot of the sender and client at creation, and issued invoices cannot be edited. Backups you export contain personal and bank details: keep them secure. **Never put personal or financial identifiers in the public repository or in test data.**
 
-Backups contain personal, customer and bank information. Do not share them publicly. Never hardcode personal details or financial identifiers in the public repository. **Important:** sensitive example details in the original public commit are still visible in Git history until that history is remediated separately.
-
-Invoice records save a snapshot of the sender and client details at creation. Editing a client or Your Details does not silently update past invoices. New invoices start as **Draft**. Drafts can be edited. Once **Issued**, the invoice is locked; it can then be marked Paid or Void, or duplicated as a fresh draft. Legacy invoices without an explicit status are treated as Issued for safety.
+Data saved by earlier browser-only versions stays in that browser's localStorage, untouched. It is not uploaded automatically; see the migration notes in docs/FIREBASE-SETUP.md.
 
 ## Important limitations
 
 - This is an invoice drafting tool, **not** accounting, legal or tax advice. Determine whether GST applies and the correct tax rate independently.
-- Invoice numbering is unique **within the saved browser dataset**, not across multiple devices or restored competing backups.
+- Invoice numbers (RESH-YYYY-NNN) are allocated per account in a server transaction when an invoice is issued.
 - Direct PDF generation requires the online jsPDF library the first time you use it. The fallback uses the print dialog. Long text, custom characters, and iPhone printing still need live device testing.
 - No authentication, cloud sync, server backup, invoice email sending or payments collection are included. Firebase planning and example owner-only rules are in [docs/FIREBASE-SETUP.md](docs/FIREBASE-SETUP.md); they are **not deployed or connected**.
 
 ## Developer checks
 
 ```sh
-node --check app.js
-node --check pdf.js
-node tests/smoke.cjs
+npm ci && npm test        # checks, unit/app tests, Auth+Firestore emulator suites
+npm run test:e2e          # real browser against the emulators
 ```
 
 GitHub Actions runs these checks on the repair branch and on pull requests. They cover core calculations and data flows, not real-browser visual/print testing.

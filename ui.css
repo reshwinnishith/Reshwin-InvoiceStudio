@@ -52,3 +52,22 @@ textarea { min-height:105px; }
 .status-pill{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:999px;padding:7px 12px;font-size:12px;font-weight:600;background:var(--soft);}
 #v-invoice .actions{align-items:center;}
 #v-invoice .actions .status-pill{margin-right:auto;}
+
+/* ---- V2: accounts, verification, sync state ---- */
+.authpanel{margin-top:8px}
+.form.one{grid-template-columns:1fr}
+.seg{display:grid;grid-template-columns:1fr 1fr;gap:4px;padding:4px;margin:0 0 18px;border:1px solid var(--line);border-radius:12px;background:var(--soft)}
+.seg button{min-height:40px;border-radius:9px;font-size:14px;font-weight:600;color:var(--muted)}
+.seg button[aria-selected="true"]{background:var(--surface);color:var(--fg);box-shadow:0 1px 3px rgba(28,26,24,.12)}
+.seg button:focus-visible,.linkbtn:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
+.msg{margin:14px 0 0;padding:11px 13px;border-radius:10px;font-size:13.5px;line-height:1.45;background:var(--soft);border:1px solid var(--line);color:var(--fg)}
+.msg.err{border-color:#d9a3ab;background:color-mix(in srgb,#b3273a 9%,var(--surface));color:var(--fg)}
+.msg.ok{border-color:#a8c9a6;background:color-mix(in srgb,#2f7d3b 9%,var(--surface))}
+.linkbtn{padding:10px 4px;color:var(--crimson);font-size:14px;font-weight:600;text-decoration:underline}
+.netbanner{position:sticky;top:0;z-index:40;background:#7a5a00;color:#fff;text-align:center;font-size:13px;padding:8px 14px;padding-top:calc(8px + env(safe-area-inset-top,0px))}
+.syncrow{display:flex;align-items:center;gap:9px;margin:14px 2px 0;font-size:13px;color:var(--muted)}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--muted);flex:none}.dot.ok{background:#2f7d3b}.dot.off{background:#b07a00}
+.mg-sum{margin:12px 0;padding-left:18px;line-height:1.7}
+#v-migrate ul{padding-left:18px;font-size:13px;line-height:1.6}
+#netBanner[data-emulator]::after{content:" · EMULATOR MODE";font-weight:700}
+h2[tabindex="-1"]:focus,.h[tabindex="-1"]:focus{outline:none}
