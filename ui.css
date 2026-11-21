@@ -70,3 +70,4 @@ textarea { min-height:105px; }
 .mg-sum{margin:12px 0;padding-left:18px;line-height:1.7}
 #v-migrate ul{padding-left:18px;font-size:13px;line-height:1.6}
 #netBanner[data-emulator]::after{content:" · EMULATOR MODE";font-weight:700}
+h2[tabindex="-1"]:focus,.h[tabindex="-1"]:focus{outline:none}
