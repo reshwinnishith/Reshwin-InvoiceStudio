@@ -47,3 +47,8 @@ textarea { min-height:105px; }
  .p-items tr { break-inside:avoid; }
  .p-spacer { flex:1;min-height:20px; }
 }
+
+/* Issued invoices are locked. Status actions remain explicit and readable. */
+.status-pill{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:999px;padding:7px 12px;font-size:12px;font-weight:600;background:var(--soft);}
+#v-invoice .actions{align-items:center;}
+#v-invoice .actions .status-pill{margin-right:auto;}

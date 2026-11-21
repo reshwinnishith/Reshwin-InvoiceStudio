@@ -1,0 +1,21 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    // One account owns exactly one private workspace.
+    // All documents below users/{uid} are private to that Firebase Auth uid.
+    match /users/{uid} {
+      allow read, write: if signedIn() && request.auth.uid == uid;
+      match /{document=**} {
+        allow read, write: if signedIn() && request.auth.uid == uid;
+      }
+    }
+    // No access to any unrelated or accidental top-level collection.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

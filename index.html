@@ -224,10 +224,10 @@ select{appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns=
   <section id="v-invoice" hidden>
     <div class="stage" id="stage"><div class="paper" id="paper"></div></div>
     <div class="actions">
-      <button class="btn" id="dl">Download PDF</button><button class="btn sec" id="copy">Copy as text</button>
-      <button class="btn sec" id="editInv">Edit invoice</button><button class="btn sec" id="newInv">New invoice</button>
+      <span id="invoiceStatus" class="status-pill" aria-live="polite"></span><button class="btn" id="dl">Download PDF</button><button class="btn sec" id="printInv">Print / Save as PDF</button><button class="btn sec" id="copy">Copy as text</button>
+      <button class="btn sec" id="editInv">Edit draft</button><button class="btn" id="issueInv">Issue invoice</button><button class="btn sec" id="paidInv">Mark paid</button><button class="btn sec" id="voidInv">Void invoice</button><button class="btn sec" id="duplicateInv">Duplicate</button><button class="btn sec" id="newInv">New invoice</button>
     </div>
-    <div class="note">Download PDF opens your print dialog. Choose "Save as PDF", paper A4, margins None.</div>
+    <div class="note">Download PDF generates an A4 file. If it fails, use Print / Save as PDF (choose A4, margins None).</div>
   </section>
 
   <!-- DETAILS -->
@@ -291,6 +291,7 @@ select{appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns=
 </div>
 <div class="toast" id="toast"></div>
 
+<script src="pdf.js" defer></script>
 <script src="app.js" defer></script>
 
 </body>
