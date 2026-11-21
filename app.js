@@ -432,6 +432,8 @@ function bind(){
  for(const l of document.querySelectorAll('.f > label:not([for])')){const c=l.parentElement?.querySelector?.('input,select,textarea');if(c?.id)l.setAttribute('for',c.id);}
  window.addEventListener('resize',scalePaper);
  window.addEventListener('beforeunload',e=>{if(dirty){e.preventDefault();e.returnValue='';}});
+ // A page restored from the back/forward cache could show a previous session's data: reload so auth is re-evaluated.
+ window.addEventListener('pageshow',e=>{if(e.persisted){try{globalThis.location?.reload?.();}catch(_){}}});
  window.addEventListener('online',renderSync);window.addEventListener('offline',renderSync);
  document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&view==='verify'&&cloud&&!busy)checkVerified();});
  $('fab').onclick=()=>openInvoiceEditor();

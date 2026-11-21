@@ -34,6 +34,8 @@ counts/duplicates/numbering gaps, offers a checksummed backup download and a rol
 The confirmed import is intentionally disabled: historical issued/paid invoices cannot be created through the strict client rules
 (they would need a separately approved import path in the rules). Decide that before enabling import.
 
+See [LIVE-TEST-PLAN.md](LIVE-TEST-PLAN.md) for the controlled live test plan (not executed).
+
 ## Release checklist (not yet approved)
 1. Approve the numbering-at-issue design and the rules in `firestore.rules`.
 2. Deploy rules to production Firestore, then immediately re-run the emulator suites against the exact deployed file and smoke-test with a throwaway verified account.

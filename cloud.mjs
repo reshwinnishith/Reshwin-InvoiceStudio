@@ -91,11 +91,12 @@ export function createCloud({ auth, db, A, F, core: Core = globalThis.InvoiceCor
       emit(next);
       return next;
     },
-    // Always resolves, so the screen reveals nothing about whether an address has an account.
+    // Gives no account-enumeration signal (an unknown address looks like success), but every OTHER failure is surfaced so the
+    // screen never claims an email was sent when it was not (bad address, network, rate limit, unauthorized continue URL…).
     async requestPasswordReset(email) {
       try { await A.sendPasswordResetEmail(auth, email, actionUrl ? { url: actionUrl } : undefined); } catch (e) {
-        if (e?.code === 'auth/invalid-email') throw e;
-        if (e?.code === 'auth/network-request-failed' || e?.code === 'auth/too-many-requests') throw e;
+        if (e?.code === 'auth/user-not-found') return;
+        throw e;
       }
     },
 

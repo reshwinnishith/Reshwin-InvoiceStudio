@@ -8,6 +8,8 @@
   if(!loading)loading=new Promise((resolve,reject)=>{
    const tag=document.createElement('script');
    tag.src='https://cdn.jsdelivr.net/npm/jspdf@4.2.1/dist/jspdf.umd.min.js';
+   // Subresource Integrity: the browser refuses the file if the CDN copy differs from the audited jsPDF 4.2.1 build.
+   tag.integrity='sha384-qovJwSBbRDPP5cEjCp8S0UP66wrvnjaa60XMOGzTNanrThcrGfXfnZkvgY8N1KT3';
    tag.crossOrigin='anonymous';
    tag.onload=()=>window.jspdf?.jsPDF?resolve(window.jspdf.jsPDF):reject(Error('PDF library unavailable'));
    tag.onerror=()=>reject(Error('Could not load PDF library'));
@@ -26,7 +28,7 @@
    if(y+required<=bottom)return;
    footer();doc.addPage();page++;
    y=22;doc.setFont('helvetica','bold');doc.setFontSize(10);doc.setTextColor(110,100,95);
-   doc.text(safe(inv.no)+' (continued)',left,y);y+=12;
+   doc.text((inv.no?safe(inv.no):'Draft invoice')+' (continued)',left,y);y+=12;
   }
   function footer(){
    doc.setFontSize(8);doc.setFont('helvetica','normal');doc.setTextColor(125,125,125);
@@ -52,7 +54,7 @@
   doc.setFont('helvetica','bold');doc.setFontSize(27);doc.setTextColor(124,29,43);
   doc.text('INVOICE',left,y);y+=13;
   doc.setFontSize(10);doc.setTextColor(75,68,62);
-  doc.text('Invoice number: '+safe(inv.no),left,y);
+  doc.text('Invoice number: '+(inv.no?safe(inv.no):'Assigned when issued'),left,y);
   doc.text('Date: '+safe(utils.dateLabel(inv.date)),right,y,{align:'right'});y+=8;
   const status=utils.invoiceStatus(inv);
   if(status==='draft'||status==='void'){

@@ -86,8 +86,20 @@ try {
   await page.click('#au_tab_up'); await page.fill('#au_email', email2); await page.fill('#au_pass', pass); await page.fill('#au_pass2', pass); await page.click('#au_submit');
   await page.waitForSelector('#v-verify:not([hidden])'); await verifyEmail(email2); await page.click('#vf_check'); await page.waitForSelector('#v-home:not([hidden])');
   ok('second account sees an empty workspace', (await page.textContent('#ibcount')).startsWith('0') && !(await page.content()).includes('Fictional Client Ltd'));
-  // wrong password and wide/mobile layout
+  // ---- multi-tab: signing out in another tab ends this tab's session too ----
+  const tab2 = await ctx.newPage(); tab2.on('dialog', d => d.accept());
+  await tab2.goto('http://127.0.0.1:5173/?emulator=1'); await tab2.waitForSelector('#v-home:not([hidden])', { timeout: 20000 });
+  await tab2.click('#setBtn'); await tab2.click('#signOut'); await tab2.waitForSelector('#v-welcome:not([hidden])', { timeout: 20000 });
+  await waitFor(() => !document.getElementById('v-welcome').hidden, null, { timeout: 20000 });
+  ok('signing out in another tab signs this tab out and clears its private screen', await page.evaluate(() => document.getElementById('iblist').innerHTML === ''));
+  await tab2.close();
+  // ---- reduced motion ----
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  ok('reduced motion: transitions are effectively disabled', await page.evaluate(() => parseFloat(getComputedStyle(document.getElementById('toast')).transitionDuration) < 0.01));
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await page.fill('#au_email', email2); await page.fill('#au_pass', pass); await page.click('#au_submit'); await page.waitForSelector('#v-home:not([hidden])', { timeout: 20000 });
   await page.click('#setBtn'); await page.click('#signOut'); await page.waitForSelector('#v-welcome:not([hidden])');
+  // wrong password and wide/mobile layout
   await page.fill('#au_email', email); await page.fill('#au_pass', 'wrong-password-123'); await page.click('#au_submit'); await waitFor(() => /incorrect/i.test(document.getElementById('au_msg').textContent)); ok('wrong password shows friendly error', true); await shot('11-wrong-password');
   ok('no horizontal scroll on mobile width', await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
   await page.setViewportSize({ width: 1280, height: 800 }); await page.waitForTimeout(200); await shot('12-desktop-welcome');

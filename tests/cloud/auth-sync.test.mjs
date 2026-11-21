@@ -84,6 +84,17 @@ test('owner can create sender/client/draft, issue with RESH numbering, pay; issu
   await u.c.close();
 });
 
+test('sender details: updates carry the token; a stale token is a conflict', async () => {
+  const u = await readyUser(); await u.ws.saveSender(sender);
+  await until(() => u.data().senderToken, 'sender visible');
+  const t1 = u.data().senderToken;
+  await u.ws.saveSender({ ...sender, bank: 'Second Bank' }, t1);
+  await until(() => u.data().sender.bank === 'Second Bank' && u.data().senderToken !== t1, 'second save visible');
+  await assert.rejects(u.ws.saveSender({ ...sender, bank: 'Stale' }, t1), e => e.code === 'conflict');
+  assert.equal(u.data().sender.bank, 'Second Bank');
+  await u.c.close();
+});
+
 test('numbers are gapless per account, year comes from the invoice date, drafts do not consume numbers', async () => {
   const u = await readyUser(); const cid = await seed(u);
   const mk = async date => u.ws.saveDraft(null, input({ clientId: cid, date }), { id: cid, ...client }, sender);

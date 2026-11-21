@@ -19,7 +19,7 @@ const context=vm.createContext({
  localStorage:{getItem:k=>store.get(k)??null,setItem:(k,v)=>{store.set(k,v)},removeItem:k=>store.delete(k)},
  location:{reload(){context.__reloads=(context.__reloads||0)+1;}},
  document:{getElementById:get,createElement:tag=>node(tag),addEventListener(){},querySelectorAll(){return[]},title:'test',visibilityState:'visible'},
- window:{scrollTo(){},addEventListener(){},print(){}},
+ window:{scrollTo(){},addEventListener(t,fn){(context.__winHandlers=context.__winHandlers||{})[t]=fn;},print(){}},
  navigator:{onLine:true},confirm:()=>true,
  requestAnimationFrame:fn=>fn(),setTimeout:(fn)=>{return 1},clearTimeout(){},setInterval:()=>1,clearInterval(){},
  Blob,URL:{createObjectURL:()=>'',revokeObjectURL(){}}
@@ -75,6 +75,7 @@ function makeFake(){
  assert.deepEqual(visible(),['welcome'],'signed-out users see only the welcome screen');
  assert.ok(!get('bar').innerHTML.includes('setBtn'),'no private chrome while signed out');
 
+ context.__reloads=0;context.__winHandlers.pageshow({persisted:false});assert.equal(context.__reloads,0);context.__winHandlers.pageshow({persisted:true});assert.equal(context.__reloads,1,'bfcache restore reloads the page');context.__reloads=0;
  /* sign-up validation and errors */
  run("setAuthMode('up')");
  get('au_email').value='not-an-email';get('au_pass').value='x';await submit('au_form');
