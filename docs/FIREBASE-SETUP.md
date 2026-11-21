@@ -39,7 +39,7 @@ See [LIVE-TEST-PLAN.md](LIVE-TEST-PLAN.md) for the controlled live test plan (no
 ## Release checklist (not yet approved)
 1. Approve the numbering-at-issue design and the rules in `firestore.rules`.
 2. Deploy rules to production Firestore, then immediately re-run the emulator suites against the exact deployed file and smoke-test with a throwaway verified account.
-3. Consider enabling a Firebase Authentication password policy (min length 12), email-enumeration protection, and App Check — none are enabled today; client-side checks alone can be bypassed.
+3. Consider enabling a Firebase Authentication password policy (min length 8, matching the app), email-enumeration protection, and App Check — none are enabled today; client-side checks alone can be bypassed.
 4. Restrict the web API key to the production domain (HTTP referrers) in Google Cloud Console.
 5. Real-device (iPhone/Safari) testing, PDF visual review and a privacy policy / account-deletion path before public sign-ups.
 6. Approve and build the historical-import path, then run the migration with backup/rollback.

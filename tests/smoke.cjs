@@ -40,11 +40,12 @@ function makeFake(){
  const accounts={};let session={status:'signedOut'};const subs=new Set();const log=[];let seq=0;
  const f={log,workspaces:[],failNext:null,gate:null,
   describeAuthError:e=>'AUTH:'+(e.code||e.message),
+  describeEmailSendError:e=>'EMAILFAIL:'+e.code,
   get session(){return session;},
   setSession(s){session=s;[...subs].forEach(cb=>cb(s));},
   onSession(cb){subs.add(cb);cb(session);return()=>subs.delete(cb);},
-  async signUp(email,pw){log.push('signUp');if(accounts[email])throw Object.assign(Error('x'),{code:'auth/email-already-in-use'});accounts[email]={uid:'u-'+email,data:{sender:null,clients:[],invoices:[],counter:0},verified:false};f.setSession({status:'unverified',uid:accounts[email].uid,email});return{verificationSent:true};},
-  async signIn(email,pw){log.push('signIn');const a=accounts[email];if(!a||pw==='bad')throw Object.assign(Error('x'),{code:'auth/invalid-credential'});f.setSession(a.verified?{status:'ready',uid:a.uid,email}:{status:'unverified',uid:a.uid,email});},
+  async signUp(email,pw){log.push('signUp');if(f.sendFails){accounts[email]={uid:'u-'+email,data:{sender:null,clients:[],invoices:[],counter:0},verified:false,pw};f.setSession({status:'unverified',uid:accounts[email].uid,email});return{verificationSent:false,errorCode:f.sendFails};}if(accounts[email])throw Object.assign(Error('x'),{code:'auth/email-already-in-use'});accounts[email]={uid:'u-'+email,data:{sender:null,clients:[],invoices:[],counter:0},verified:false,pw};f.setSession({status:'unverified',uid:accounts[email].uid,email});return{verificationSent:true};},
+  async signIn(email,pw){log.push('signIn');const a=accounts[email];if(!a||pw==='bad'||(a.pw&&a.pw!==pw))throw Object.assign(Error('x'),{code:'auth/invalid-credential'});f.setSession(a.verified?{status:'ready',uid:a.uid,email}:{status:'unverified',uid:a.uid,email});},
   async signOut(){log.push('signOut');f.setSession({status:'signedOut'});},
   async resendVerification(){log.push('resend');if(f.cooldown)throw new CloudError('cooldown','Please wait 30 seconds before requesting another email.');},
   async refreshVerification(){log.push('refresh');const email=session.email;if(accounts[email]?.verified){f.setSession({status:'ready',uid:session.uid,email});}return session;},
@@ -76,12 +77,32 @@ function makeFake(){
  assert.ok(!get('bar').innerHTML.includes('setBtn'),'no private chrome while signed out');
 
  context.__reloads=0;context.__winHandlers.pageshow({persisted:false});assert.equal(context.__reloads,0);context.__winHandlers.pageshow({persisted:true});assert.equal(context.__reloads,1,'bfcache restore reloads the page');context.__reloads=0;
+ /* regression: verification email could not be sent -> account is kept, reason shown, user can recover without registering again */
+ {const f2=makeFake();context.window.InvoiceApp.start(f2);await settle();
+  run("setAuthMode('up')");
+  for(const code of ['auth/too-many-requests','auth/network-request-failed','auth/unauthorized-continue-uri']){
+   f2.sendFails=code;f2.setSession({status:'signedOut'});await settle();run("setAuthMode('up')");
+   const em=code.split('/')[1]+'@example.test';get('au_email').value=em;get('au_pass').value='Fictional-Pass-1';get('au_pass2').value='Fictional-Pass-1';await submit('au_form');
+   assert.deepEqual(visible(),['verify']);assert.equal(get('vf_msg').textContent,'Account created. EMAILFAIL:'+code,'real error code is mapped, not swallowed');
+   // registering the same address again with the same password recovers the existing unverified account
+   f2.setSession({status:'signedOut'});await settle();run("setAuthMode('up')");f2.sendFails=null;
+   get('au_email').value=em;get('au_pass').value='Fictional-Pass-1';get('au_pass2').value='Fictional-Pass-1';await submit('au_form');
+   assert.deepEqual(visible(),['verify']);assert.match(get('vf_msg').textContent,/already existed/,'unverified account is recoverable');
+   assert.equal(f2.log.filter(x=>x==='signUp').length>=1,true);
+  }
+  // already-registered address with a DIFFERENT password reveals nothing beyond the generic hint
+  f2.setSession({status:'signedOut'});await settle();run("setAuthMode('up')");
+  get('au_email').value='too-many-requests@example.test';get('au_pass').value='Another-Pass-9';get('au_pass2').value='Another-Pass-9';await submit('au_form');
+  assert.equal(get('au_msg').textContent,'AUTH:auth/email-already-in-use');assert.deepEqual(visible(),['welcome']);
+  f2.setSession({status:'signedOut'});await settle();
+ }
+ context.window.InvoiceApp.start(fake);await settle();
  /* sign-up validation and errors */
  run("setAuthMode('up')");
  get('au_email').value='not-an-email';get('au_pass').value='x';await submit('au_form');
  assert.match(get('au_msg').textContent,/valid email/);
- get('au_email').value='a@example.test';get('au_pass').value='short';await submit('au_form');
- assert.match(get('au_msg').textContent,/12 characters/);
+ get('au_email').value='a@example.test';get('au_pass').value='short1';await submit('au_form');
+ assert.match(get('au_msg').textContent,/8 characters/);
  get('au_pass').value='Fictional-Pass-1234';get('au_pass2').value='different-pass-1234';await submit('au_form');
  assert.match(get('au_msg').textContent,/do not match/); assert.ok(!fake.log.includes('signUp'));
  get('au_pass2').value='Fictional-Pass-1234';await submit('au_form');

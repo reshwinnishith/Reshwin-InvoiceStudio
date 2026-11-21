@@ -32,7 +32,7 @@ Everything is denied except `users/{uid}/…` for a request whose token has `ema
 | # | Action | Expected |
 |---|---|---|
 | 1 | Open the site signed out | Welcome screen only; no private UI; console clean |
-| 2 | Create account with a 12+ character password | "Verify your email" screen; no workspace; direct Firestore reads in DevTools are denied |
+| 2 | Create account with a 8+ character password | "Verify your email" screen; no workspace; direct Firestore reads in DevTools are denied |
 | 3 | Tap "I've verified" before clicking the email link | Stays on verify screen |
 | 4 | Click the emailed link, return, tap "I've verified" | Home screen, empty |
 | 5 | Resend / reset password from a signed-out tab | Success message; reset email arrives; wrong-address request shows the same message |
@@ -58,7 +58,7 @@ Delete only the disposable user (Console → Authentication) and its `users/{uid
 | Setting | Current | Recommended |
 |---|---|---|
 | Authorized domains | localhost, partypulse-d8ad3.firebaseapp.com, partypulse-d8ad3.web.app, reshwin-invoicestudio.vercel.app | keep; remove `localhost` before public launch if not needed |
-| Password policy | not set | min length 12 (matches the app's client-side check, which can be bypassed) |
+| Password policy | not set | min length 8 (matches the app's client-side check, which can be bypassed; enforce it in the TEST project first) |
 | Email enumeration protection | **enabled** | keep |
 | App Check (Firestore, Identity Toolkit) | UNENFORCED | register reCAPTCHA provider, run in monitor mode first, then enforce |
 | Web API key restrictions | API targets only; **no HTTP-referrer restriction** | restrict to `reshwin-invoicestudio.vercel.app/*` (add preview/localhost only while testing) |

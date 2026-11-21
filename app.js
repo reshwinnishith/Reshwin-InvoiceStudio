@@ -10,6 +10,7 @@ const blankFrom = () => Core.blankFrom();
 const newState = () => ({from:blankFrom(),senderToken:null,clients:[],invoices:[],counter:0});
 let state=newState(), view='loading', history=[], editingClient=null, viewingClient=null, editingInvoice=null, viewingInvoice=null, dirty=false;
 let pendingInvoice=null, cloud=null, ws=null, sessionUid=null, synced=false, offline=false, busy=false, authMode='in', resendTimer=null, migrationPlan=null;
+const MIN_PASSWORD=8;
 const AUTH_VIEWS=['loading','welcome','verify','reset'];
 const VIEWS=['loading','welcome','verify','reset','home','generate','invoice','details','clients','client','client-edit','settings','migrate'];
 const GEAR='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 1 1-14 0 7 7 0 0 1 14 0Z"/></svg>';
@@ -173,12 +174,22 @@ async function submitAuth(ev){
  if(!EMAIL_OK(email)){setMsg($('au_msg'),'Enter a valid email address.','err');return;}
  if(!pass){setMsg($('au_msg'),'Enter your password.','err');return;}
  if(authMode==='up'){
-  if(pass.length<12){setMsg($('au_msg'),'Choose a password of at least 12 characters.','err');return;}
+  if(pass.length<MIN_PASSWORD){setMsg($('au_msg'),'Choose a password of at least '+MIN_PASSWORD+' characters.','err');return;}
   if(pass!==$('au_pass2').value){setMsg($('au_msg'),'The two passwords do not match.','err');return;}
  }
  busy=true;$('au_submit').disabled=true;setMsg($('au_msg'),authMode==='up'?'Creating your account…':'Signing in…','');
  try{
-  if(authMode==='up'){const r=await cloud.signUp(email,pass);if(!r.verificationSent)toast('Account created, but the verification email could not be sent. Use “Resend email”.');}
+  if(authMode==='up'){
+   try{
+    const r=await cloud.signUp(email,pass);
+    if(!r.verificationSent)setMsg($('vf_msg'),'Account created. '+cloud.describeEmailSendError({code:r.errorCode}),'err');
+   }catch(e){
+    // Registering an address that already has an account: if these are its credentials, simply continue into it (this is how an
+    // unverified account is recovered without registering twice). Otherwise say nothing more specific than "may already exist".
+    if(e?.code!=='auth/email-already-in-use')throw e;
+    try{await cloud.signIn(email,pass);setMsg($('vf_msg'),'This account already existed, so we signed you in.','ok');}catch(_){throw e;}
+   }
+  }
   else await cloud.signIn(email,pass);
   $('au_pass').value='';$('au_pass2').value='';
  }catch(e){setMsg($('au_msg'),cloud.describeAuthError(e),'err');}

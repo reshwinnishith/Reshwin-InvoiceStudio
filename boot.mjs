@@ -3,7 +3,7 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-app.js';
 import * as A from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js';
 import * as F from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js';
-import { createCloud, describeAuthError } from './cloud.mjs';
+import { createCloud, describeAuthError, describeEmailSendError } from './cloud.mjs';
 
 // Email links may only return to an authorized domain. Previews and localhost omit the continue URL and use Firebase's default page.
 const PRODUCTION_HOSTS = ['reshwin-invoicestudio.vercel.app'];
@@ -21,6 +21,7 @@ try {
   }
   const cloud = createCloud({ auth, db, A, F, core: window.InvoiceCore, actionUrl: PRODUCTION_HOSTS.includes(location.hostname) ? location.origin + '/' : null });
   cloud.describeAuthError = describeAuthError;
+  cloud.describeEmailSendError = describeEmailSendError;
   window.InvoiceApp.start(cloud, { emulator });
 } catch (e) {
   console.error('Startup failed', e);

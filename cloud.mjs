@@ -15,7 +15,7 @@ export function describeAuthError(e) {
   const c = e?.code || '';
   if (c === 'auth/email-already-in-use') return 'An account with this email may already exist. Try signing in, or reset your password.';
   if (c === 'auth/invalid-email') return 'Enter a valid email address.';
-  if (c === 'auth/weak-password') return 'Choose a stronger password (at least 12 characters).';
+  if (c === 'auth/weak-password') return 'Choose a stronger password (at least 8 characters).';
   if (c === 'auth/network-request-failed') return 'No connection. Check your internet and try again.';
   if (c === 'auth/too-many-requests') return 'Too many attempts. Please wait a few minutes before trying again.';
   if (c === 'auth/user-disabled') return 'This account has been disabled.';
@@ -23,6 +23,18 @@ export function describeAuthError(e) {
   if (c === 'auth/requires-recent-login') return 'Please sign in again to continue.';
   return 'Something went wrong. Please try again.';
 }
+
+// Why a verification / reset email could not be sent, in words a user can act on. Never includes the address or any token.
+export function describeEmailSendError(e) {
+  const c = e?.code || '';
+  if (c === 'auth/too-many-requests') return 'Too many emails were requested. Wait a few minutes, then tap “Resend email”.';
+  if (c === 'auth/network-request-failed') return 'No connection, so the email could not be sent. Check your internet, then tap “Resend email”.';
+  if (['auth/unauthorized-continue-uri', 'auth/invalid-continue-uri', 'auth/missing-continue-uri'].includes(c)) return 'Email links are not enabled for this website yet. Please contact the site owner.';
+  if (c === 'auth/user-token-expired' || c === 'auth/requires-recent-login') return 'Please sign in again, then tap “Resend email”.';
+  if (c === 'auth/invalid-email') return 'That email address is not valid.';
+  return 'The verification email could not be sent right now. Your account is saved — tap “Resend email” to try again.';
+}
+const CONTINUE_URL_ERRORS = ['auth/unauthorized-continue-uri', 'auth/invalid-continue-uri', 'auth/missing-continue-uri'];
 
 export function createCloud({ auth, db, A, F, core: Core = globalThis.InvoiceCore, id = () => (globalThis.crypto?.randomUUID?.() || 'id' + Date.now() + Math.random().toString(36).slice(2)), timeoutMs = OP_TIMEOUT_MS, actionUrl = null }) {
   let session = { status: 'loading' };
@@ -61,15 +73,27 @@ export function createCloud({ auth, db, A, F, core: Core = globalThis.InvoiceCor
     return new CloudError('unknown', 'Could not save. Nothing was changed.', e);
   }
 
+  // A continue URL that Firebase rejects must not block the email: retry once with Firebase's default action page.
+  async function sendVerification(user) {
+    try { await A.sendEmailVerification(user, actionUrl ? { url: actionUrl } : undefined); }
+    catch (e) { if (actionUrl && CONTINUE_URL_ERRORS.includes(e?.code)) await A.sendEmailVerification(user); else throw e; }
+  }
+  async function sendReset(email) {
+    try { await A.sendPasswordResetEmail(auth, email, actionUrl ? { url: actionUrl } : undefined); }
+    catch (e) { if (actionUrl && CONTINUE_URL_ERRORS.includes(e?.code)) await A.sendPasswordResetEmail(auth, email); else throw e; }
+  }
+
   const api = {
     get session() { return session; },
     onSession(cb) { listeners.add(cb); cb(session); return () => listeners.delete(cb); },
 
+    // The account is created first; sending the verification email is a separate step whose failure must never lose the account.
+    // The real Firebase error code is returned (never logged) so the screen can explain what to do. Signing in later reaches the
+    // same "verify your email" screen with a working Resend button, so nobody has to register twice.
     async signUp(email, password) {
       const cred = await A.createUserWithEmailAndPassword(auth, email, password);
-      let verificationSent = true;
-      try { await A.sendEmailVerification(cred.user, actionUrl ? { url: actionUrl } : undefined); lastVerificationSent = Date.now(); } catch (e) { verificationSent = false; }
-      return { verificationSent };
+      try { await sendVerification(cred.user); lastVerificationSent = Date.now(); return { verificationSent: true, errorCode: null }; }
+      catch (e) { return { verificationSent: false, errorCode: e?.code || 'unknown' }; }
     },
     async signIn(email, password) { await A.signInWithEmailAndPassword(auth, email, password); },
     async signOut() { await A.signOut(auth); },
@@ -78,7 +102,7 @@ export function createCloud({ auth, db, A, F, core: Core = globalThis.InvoiceCor
       if (!user) throw new CloudError('signed-out', 'Please sign in first.');
       const wait = cooldownMs - (Date.now() - lastVerificationSent);
       if (wait > 0) throw new CloudError('cooldown', 'Please wait ' + Math.ceil(wait / 1000) + ' seconds before requesting another email.');
-      await A.sendEmailVerification(user, actionUrl ? { url: actionUrl } : undefined);
+      await sendVerification(user);
       lastVerificationSent = Date.now();
     },
     // Re-reads the account from the server so a just-clicked verification link is noticed, and refreshes the token.
@@ -94,7 +118,7 @@ export function createCloud({ auth, db, A, F, core: Core = globalThis.InvoiceCor
     // Gives no account-enumeration signal (an unknown address looks like success), but every OTHER failure is surfaced so the
     // screen never claims an email was sent when it was not (bad address, network, rate limit, unauthorized continue URL…).
     async requestPasswordReset(email) {
-      try { await A.sendPasswordResetEmail(auth, email, actionUrl ? { url: actionUrl } : undefined); } catch (e) {
+      try { await sendReset(email); } catch (e) {
         if (e?.code === 'auth/user-not-found') return;
         throw e;
       }
