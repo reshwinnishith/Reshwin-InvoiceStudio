@@ -19,9 +19,9 @@ const TITLES={generate:'Invoice editor',invoice:'Invoice',details:'Your Details'
 const id = () => (globalThis.crypto?.randomUUID?.() || ('id-'+Date.now()+'-'+Math.random().toString(36).slice(2)));
 function esc(v){return String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
 function toast(msg){const e=$('toast');e.textContent=msg;e.classList.add('show');clearTimeout(toast.timer);toast.timer=setTimeout(()=>e.classList.remove('show'),3200);}
+const IV=globalThis.InvoiceView;
+const {money,dateLabel,amountWords}=IV;
 const parseAmount=Core.parseAmount;
-function money(paise){return '₹'+(Number(paise||0)/100).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});}
-function dateLabel(s){if(!Core.validDate(s))return '—';const [y,m,d]=s.split('-').map(Number);return new Date(y,m-1,d).toLocaleDateString('en-IN',{day:'numeric',month:'long',year:'numeric'});}
 
 /* ---------- navigation ---------- */
 function checkLeave(){
@@ -31,6 +31,7 @@ function checkLeave(){
 }
 function show(next){
  view=next;VIEWS.forEach(v=>{const e=$('v-'+v);if(e)e.hidden=v!==view});renderBar();window.scrollTo(0,0);
+ const sec=$('v-'+view);if(sec?.classList){sec.classList.remove('enter');void sec.offsetWidth;sec.classList.add('enter');}
  // Move keyboard/screen-reader focus to the new screen's heading.
  const h=$('v-'+view)?.querySelector?.('h2,.invoicebox .h');if(h){h.setAttribute('tabindex','-1');h.focus?.({preventScroll:true});}
 }
@@ -70,6 +71,16 @@ function fillFields(fields,prefix,obj){fields.forEach(field=>$(prefix+field).val
 const fromFields=['name','addr','pan','type','bank','branch','acc','ifsc'];
 const clientFields=['name','addr','pan','gstin'];
 
+/* ---------- add-button motion: the + turns a quarter-step, then the editor opens (skipped with reduced motion) ---------- */
+let springing=false;
+function springOpen(btn,open){
+ if(springing)return;
+ const reduce=!!globalThis.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
+ if(reduce){open();return;}
+ springing=true;btn.classList.add('spin');
+ setTimeout(()=>{try{open();}finally{btn.classList.remove('spin');springing=false;}},220);
+}
+
 /* ---------- write helper: one write at a time, success only after the server confirms ---------- */
 async function perform(button,fn){
  if(busy)return false;
@@ -89,7 +100,7 @@ async function perform(button,fn){
 function teardown(){
  const w=ws;ws=null;sessionUid=null;
  try{w?.close();}catch(e){}
- state=newState();synced=false;offline=false;history=[];
+ state=newState();synced=false;offline=false;history=[];homeFilter='all';sheetInv=null;if($('issueSheet'))$('issueSheet').hidden=true;
  editingClient=viewingClient=editingInvoice=viewingInvoice=null;dirty=false;migrationPlan=null;
  for(const e of document.querySelectorAll('#v-home input,#v-generate input,#v-generate select,#v-details input,#v-details textarea,#v-client-edit input,#v-client-edit textarea,#v-generate textarea,#v-details select')){try{e.value='';}catch(_){}}
  for(const idn of ['iblist','clientList','clientDetail','paper','mg_report'])if($(idn))$(idn).innerHTML='';
@@ -226,7 +237,11 @@ async function signOutNow(){
 }
 
 /* ---------- details & clients ---------- */
-function showDetails(){fillFields(fromFields,'f_',state.from);dirty=false;go('details');}
+function showDetails(){
+ fillFields(fromFields,'f_',state.from);dirty=false;
+ const saved=!!(state.from.name&&state.from.addr);$('f_saved').hidden=!saved;$('f_hint').hidden=saved;
+ go('details');
+}
 async function saveDetails(){
  const v=Core.validateSender(formValues(fromFields,'f_'));
  if(v.error){toast(v.error);return;}
@@ -275,18 +290,29 @@ async function deleteClient(){
 }
 
 /* ---------- invoices ---------- */
-function invoiceStatus(inv){return Core.STATUSES.includes(inv?.status)?inv.status:'issued';}
+const invoiceStatus=IV.status;
+let homeFilter='all';
+const isDraft=i=>invoiceStatus(i)==='draft';
 function renderInvoices(){
  const box=$('iblist');box.innerHTML='';
- $('ibcount').textContent=state.invoices.length+' '+(state.invoices.length===1?'invoice':'invoices');
- if(!state.invoices.length){box.className='ibempty';box.innerHTML='<div class="big">No invoices yet</div><div class="sub">Tap + to create your first invoice.</div>';return;}
+ const counts={all:state.invoices.length,drafts:state.invoices.filter(isDraft).length};counts.issued=counts.all-counts.drafts;
+ for(const k of ['all','drafts','issued']){$('n_'+k).textContent=counts[k];const t=$('flt_'+k);t.setAttribute('aria-selected',String(homeFilter===k));t.setAttribute('aria-label',{all:'All',drafts:'Drafts',issued:'Issued, paid and void'}[k]+', '+counts[k]);}
+ const list=state.invoices.filter(i=>homeFilter==='all'||(homeFilter==='drafts'?isDraft(i):!isDraft(i)));
+ $('ibcount').textContent=list.length+' '+(list.length===1?'invoice':'invoices');
+ if(!list.length){
+  box.className='ibempty';
+  const msg={all:['No invoices yet','Tap + to create your first invoice.'],drafts:['No drafts','Drafts you start but have not issued appear here.'],issued:['Nothing issued yet','Issued, paid and void invoices appear here.']}[homeFilter];
+  box.innerHTML='<div class="big">'+msg[0]+'</div><div class="sub">'+msg[1]+'</div>';return;
+ }
  box.className='iblist';
- state.invoices.forEach(inv=>{
-  const b=document.createElement('button');b.className='inv';
-  b.innerHTML='<span class="num">'+esc(inv.no||'Draft')+'</span><span class="cn">'+esc(inv.client?.name||'Client')+'</span><span class="amt">'+esc(money(inv.totalPaise??inv.amountPaise))+'</span>';
+ list.forEach(inv=>{
+  const st=invoiceStatus(inv),b=document.createElement('button');b.className='inv';
+  b.setAttribute('aria-label',(inv.client?.name||'Client')+', '+(inv.no||'draft')+', '+IV.STATUS_LABEL[st]+', '+money(inv.totalPaise??inv.amountPaise));
+  b.innerHTML='<span class="cn">'+esc(inv.client?.name||'Client')+'</span><span class="amt">'+esc(money(inv.totalPaise??inv.amountPaise))+'</span><span class="num">'+esc(inv.no||'Draft')+'</span><span class="st st-'+st+'">'+IV.STATUS_LABEL[st]+'</span>';
   b.onclick=()=>showInvoice(inv.id);box.appendChild(b);
  });
 }
+function setFilter(k){homeFilter=k;renderInvoices();}
 function fillClients(selected){
  const s=$('g_client');s.replaceChildren();
  if(!state.clients.length){
@@ -322,17 +348,6 @@ async function submitInvoice(){
  const ok=await perform($('g_go'),async w=>{savedId=await w.saveDraft(old?.id||null,v.value,client,state.from,old?.updateToken);});
  if(ok){dirty=false;editingInvoice=null;history=['home'];viewingInvoice=savedId;pendingInvoice=savedId;show('invoice');paintView();toast('Draft saved. Issue it when it is ready.');}
 }
-const ONES=['','One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten','Eleven','Twelve','Thirteen','Fourteen','Fifteen','Sixteen','Seventeen','Eighteen','Nineteen'];
-const TENS=['','','Twenty','Thirty','Forty','Fifty','Sixty','Seventy','Eighty','Ninety'];
-function below1000(n){const h=Math.floor(n/100),r=n%100;return (h?ONES[h]+' Hundred'+(r?' ':''):'')+(r?(r<20?ONES[r]:TENS[Math.floor(r/10)]+(r%10?' '+ONES[r%10]:'')):'');}
-function words(n){
- if(n===0)return 'Zero';
- let parts=[];for(const [v,label] of [[10000000,'Crore'],[100000,'Lakh'],[1000,'Thousand'],[1,'']]){
-  const count=Math.floor(n/v);n%=v;
-  if(count)parts.push((count<1000?below1000(count):words(count))+(label?' '+label:''));
- }return parts.join(' ');
-}
-function amountWords(paise){const rupees=Math.floor(paise/100),p=paise%100;return 'Rupees '+words(rupees)+(p?' and '+words(p)+' Paise':'')+' Only';}
 async function updateInvoiceStatus(status){
  const inv=state.invoices.find(x=>x.id===viewingInvoice);
  if(!inv)return;
@@ -341,8 +356,34 @@ async function updateInvoiceStatus(status){
  const message=status==='issued'?'Issue this invoice? It will get its invoice number, and after issuing its details cannot be edited.':status==='paid'?'Mark this invoice as paid?':'Void this invoice? Its original record will remain for your records.';
  if(!confirm(message))return;
  let result=null;
- const ok=await perform(null,async w=>{result=status==='issued'?await w.issue(inv.id,inv.updateToken):await w.setStatus(inv.id,status,inv.updateToken);});
- if(ok)toast(status==='issued'?'Invoice '+result.number+' issued':'Invoice marked '+status);
+ const ok=await perform(status==='issued'?$('issueInv'):null,async w=>{result=status==='issued'?await w.issue(inv.id,inv.updateToken):await w.setStatus(inv.id,status,inv.updateToken);});
+ if(!ok)return;
+ if(status==='issued')openIssueSheet({...inv,no:result.number,sequence:result.sequence,status:'issued'});
+ else toast('Invoice marked '+status);
+}
+/* ---------- share / download, and the success sheet shown only after the server has confirmed an issue ---------- */
+let sheetInv=null,sheetOpener=null;
+function openIssueSheet(inv){
+ sheetInv=inv;sheetOpener=globalThis.document?.activeElement||null;
+ $('is_num').textContent=inv.no;$('issueSheet').hidden=false;$('is_title').focus?.();
+}
+function closeIssueSheet(){$('issueSheet').hidden=true;sheetInv=null;try{sheetOpener?.focus?.();}catch(e){}sheetOpener=null;}
+let sharing=false;
+async function shareInvoice(inv,button){
+ if(!inv||sharing)return;sharing=true;if(button)button.disabled=true;
+ try{
+  const r=await window.InvoicePDF.share(inv);
+  if(r==='shared')toast('Shared');else if(r==='downloaded')toast('PDF downloaded');
+  // 'cancelled': the share sheet was dismissed - say nothing and keep the user where they were.
+ }catch(e){console.error('PDF share failed',e);toast('PDF unavailable. Use Print and choose Save as PDF.');}
+ finally{sharing=false;if(button)button.disabled=false;}
+}
+let downloading=false;
+async function downloadInvoice(inv,button){
+ if(!inv||downloading)return;downloading=true;if(button)button.disabled=true;
+ try{await window.InvoicePDF.download(inv);toast('PDF downloaded');}
+ catch(e){console.error('PDF download failed',e);toast('PDF unavailable. Use Print and choose Save as PDF.');}
+ finally{downloading=false;if(button)button.disabled=false;}
 }
 async function deleteDraft(){
  const inv=state.invoices.find(x=>x.id===viewingInvoice);
@@ -369,27 +410,14 @@ function showInvoice(invoiceId){viewingInvoice=invoiceId;go('invoice');}
 function renderInvoice(invoiceId){
  const inv=state.invoices.find(x=>x.id===invoiceId);
  if(!inv){$('paper').innerHTML='<div class="p-title">Loading…</div>';return;}
- const f=inv.from||blankFrom(),c=inv.client||{},subtotal=inv.amountPaise||0,tax=inv.taxPaise||0,total=inv.totalPaise??subtotal;
- const status=invoiceStatus(inv);
- $('invoiceStatus').textContent=status.charAt(0).toUpperCase()+status.slice(1);
- $('editInv').hidden=status!=='draft';
- $('issueInv').hidden=status!=='draft';
- $('deleteInv').hidden=status!=='draft';
- $('paidInv').hidden=status!=='issued';
- $('voidInv').hidden=status!=='issued';
- const ctax=(c.pan?'<div><span class="k">PAN </span>'+esc(c.pan)+'</div>':'')+(c.gstin?'<div><span class="k">GSTIN </span>'+esc(c.gstin)+'</div>':'');
- $('paper').innerHTML=
- '<div class="p-top"></div><div class="p-title">Invoice'+(status==='draft'?' — Draft':status==='void'?' — Void':'')+'</div>'+
- '<div class="p-meta"><div><div class="p-ek">Invoice No.</div><div class="p-ev">'+(inv.no?esc(inv.no):'Assigned when issued')+'</div></div><div><div class="p-ek">Invoice Date</div><div class="p-ev">'+dateLabel(inv.date)+'</div></div></div>'+
- '<div class="p-parties"><div><div class="p-lbl">From</div><div class="p-nm">'+esc(f.name)+'</div><div class="p-ad">'+esc(f.addr)+'</div>'+(f.pan?'<div class="p-tax">PAN '+esc(f.pan)+'</div>':'')+'</div>'+
- '<div><div class="p-lbl">Invoice To</div><div class="p-nm">'+esc(c.name)+'</div><div class="p-ad">'+esc(c.addr)+'</div><div class="p-tax">'+ctax+'</div></div></div>'+
- '<table class="p-items"><thead><tr><th>S.No</th><th>Description</th><th class="r">Amount</th></tr></thead><tbody><tr><td>01</td><td class="desc">'+esc(inv.reg)+'</td><td class="r">'+money(subtotal)+'</td></tr></tbody></table>'+
- '<div class="p-spacer"></div><div class="p-tot"><div class="box"><div class="p-trow"><span>Subtotal</span><span>'+money(subtotal)+'</span></div><div class="p-trow line"><span>GST ('+(inv.taxRate||0)+'%)</span><span>'+money(tax)+'</span></div><div class="p-grand"><span class="gl">Grand Total</span><span class="gv">'+money(total)+'</span></div></div></div>'+
- '<div class="p-words"><div class="wk">Amount in words</div><div class="wv">'+amountWords(total)+'</div></div>'+
- '<div class="p-bank"><div class="bl">Bank Details for NEFT / RTGS</div><div class="p-bgrid">'+
- '<span class="k">Name</span><span class="v">'+esc(f.name)+'</span><span class="k">Account No.</span><span class="v">'+esc(f.acc)+'</span>'+
- '<span class="k">Bank</span><span class="v">'+esc(f.bank)+'</span><span class="k">Branch</span><span class="v">'+esc(f.branch)+'</span>'+
- '<span class="k">Type</span><span class="v">'+esc(f.type)+'</span><span class="k">IFSC</span><span class="v">'+esc(f.ifsc)+'</span></div></div>';
+ const m=IV.model(inv),st=m.status;
+ const pill=$('invoiceStatus');pill.textContent=m.statusLabel;pill.className='status-pill st st-'+st;
+ const show=(id,on)=>{$(id).hidden=!on;};
+ const draft=st==='draft',issuedLike=!draft;
+ show('issueInv',draft);show('editInv',draft);show('dl2',draft);show('deleteInv',draft);
+ show('shareInv',issuedLike);show('dl',issuedLike);show('paidInv',st==='issued');show('voidInv',st==='issued');show('copy',issuedLike);show('printInv',issuedLike);show('duplicateInv',true);
+ document.querySelector?.('#v-invoice .act-primary')?.classList?.toggle?.('one',draft);
+ $('paper').innerHTML=IV.paperHtml(m,esc);
  requestAnimationFrame(scalePaper);
 }
 function scalePaper(){
@@ -397,12 +425,10 @@ function scalePaper(){
  const paper=$('paper'),stage=$('stage');
  const s=Math.min(1,stage.clientWidth/794);
  paper.style.transform='scale('+s+')';
- stage.style.height=(1123*s)+'px';
+ stage.style.height=((paper.offsetHeight||1123)*s)+'px';
 }
-function copyInvoice(){
- const inv=state.invoices.find(x=>x.id===viewingInvoice);if(!inv)return;
- const f=inv.from,c=inv.client;
- const txt=['INVOICE '+(inv.no||'(draft)'),'Date: '+dateLabel(inv.date),'','From:',f.name,f.addr,'PAN: '+(f.pan||'—'),'','To:',c.name,c.addr,'',inv.reg,'Subtotal: '+money(inv.amountPaise),'GST ('+inv.taxRate+'%): '+money(inv.taxPaise),'Total: '+money(inv.totalPaise),amountWords(inv.totalPaise),'','Bank: '+f.bank,'Account: '+f.acc,'IFSC: '+f.ifsc].join('\n');
+function copyInvoice(inv=state.invoices.find(x=>x.id===viewingInvoice)){
+ if(!inv)return;const txt=IV.plainText(IV.model(inv));
  if(navigator.clipboard?.writeText)navigator.clipboard.writeText(txt).then(()=>toast('Copied'),()=>toast('Copy unavailable'));
  else toast('Clipboard requires a secure connection');
 }
@@ -447,37 +473,39 @@ function bind(){
  window.addEventListener('pageshow',e=>{if(e.persisted){try{globalThis.location?.reload?.();}catch(_){}}});
  window.addEventListener('online',renderSync);window.addEventListener('offline',renderSync);
  document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&view==='verify'&&cloud&&!busy)checkVerified();});
- $('fab').onclick=()=>openInvoiceEditor();
+ $('fab').onclick=()=>springOpen($('fab'),()=>openInvoiceEditor());
  $('navDetails').onclick=showDetails;
  $('navClients').onclick=()=>go('clients');
  $('setDetails').onclick=showDetails;
  $('setClients').onclick=()=>go('clients');
  $('f_save').onclick=saveDetails;
- $('addClient').onclick=()=>openClientEditor();
+ $('addClient').onclick=()=>springOpen($('addClient'),()=>openClientEditor());
  $('viewEditClient').onclick=()=>openClientEditor(viewingClient);
  $('ce_save').onclick=saveClient;
  $('ce_cancel').onclick=back;
  $('ce_delete').onclick=deleteClient;
  $('g_go').onclick=submitInvoice;
- $('newInv').onclick=()=>openInvoiceEditor();
  $('editInv').onclick=()=>openInvoiceEditor(viewingInvoice);
  $('issueInv').onclick=()=>updateInvoiceStatus('issued');
  $('paidInv').onclick=()=>updateInvoiceStatus('paid');
  $('voidInv').onclick=()=>updateInvoiceStatus('void');
  $('deleteInv').onclick=deleteDraft;
  $('duplicateInv').onclick=duplicateInvoice;
- $('dl').onclick=async()=>{
-  const inv=state.invoices.find(x=>x.id===viewingInvoice);if(!inv)return;
-  $('dl').disabled=true;
-  try{await window.InvoicePDF.download(inv,{money,dateLabel,amountWords,invoiceStatus});toast('PDF downloaded');}
-  catch(e){console.error('PDF download failed',e);toast('PDF unavailable. Use Print / Save as PDF.');}
-  finally{$('dl').disabled=false;}
- };
+ const cur=()=>state.invoices.find(x=>x.id===viewingInvoice);
+ $('dl').onclick=()=>downloadInvoice(cur(),$('dl'));$('dl2').onclick=()=>downloadInvoice(cur(),$('dl2'));
+ $('shareInv').onclick=()=>shareInvoice(cur(),$('shareInv'));
  $('printInv').onclick=()=>{
-  const t=document.title,inv=state.invoices.find(x=>x.id===viewingInvoice);
+  const t=document.title,inv=cur();
   document.title=inv?.no||'Invoice';window.print();setTimeout(()=>document.title=t,1000);
  };
- $('copy').onclick=copyInvoice;
+ $('is_share').onclick=()=>shareInvoice(sheetInv,$('is_share'));$('is_dl').onclick=()=>downloadInvoice(sheetInv,$('is_dl'));
+ $('is_copy').onclick=()=>copyInvoice(sheetInv);$('is_done').onclick=closeIssueSheet;
+ $('issueSheet').addEventListener('keydown',e=>{
+  if(e.key==='Escape'){closeIssueSheet();return;}
+  if(e.key==='Tab'){const f=[...($('issueSheet').querySelectorAll?.('button:not([disabled])')||[])];if(f.length){const i=f.indexOf(document.activeElement);if(e.shiftKey&&i<=0){e.preventDefault();f[f.length-1].focus();}else if(!e.shiftKey&&i===f.length-1){e.preventDefault();f[0].focus();}}}
+ });
+ $('flt_all').onclick=()=>setFilter('all');$('flt_drafts').onclick=()=>setFilter('drafts');$('flt_issued').onclick=()=>setFilter('issued');
+ $('copy').onclick=()=>copyInvoice();
  $('exportBackup').onclick=exportBackup;
  $('openMigrate').onclick=openMigrate;
  $('mg_backup').onclick=()=>{if(migrationPlan?.backup){download(migrationPlan.backup.fileName,migrationPlan.backup.body);toast('Backup downloaded (checksum '+migrationPlan.backup.checksum+')');}};

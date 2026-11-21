@@ -71,3 +71,36 @@ textarea { min-height:105px; }
 #v-migrate ul{padding-left:18px;font-size:13px;line-height:1.6}
 #netBanner[data-emulator]::after{content:" · EMULATOR MODE";font-weight:700}
 h2[tabindex="-1"]:focus,.h[tabindex="-1"]:focus{outline:none}
+
+/* ---- UX pass: filters, status, FAB motion, actions, success sheet ---- */
+.filters{display:flex;gap:6px;padding:0 14px 10px}
+.filters button{flex:1;min-height:40px;border-radius:10px;border:1px solid var(--line);background:var(--surface);font-size:13.5px;font-weight:600;color:var(--muted)}
+.filters button .n{font:600 11px var(--mono);margin-left:4px;opacity:.8}
+.filters button[aria-selected="true"]{background:var(--crimson);border-color:var(--crimson);color:#fff}
+.filters button:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
+.inv{display:grid;grid-template-columns:1fr auto;grid-template-areas:"cn amt" "num st";gap:3px 12px;align-items:center}
+.inv .cn{grid-area:cn}.inv .amt{grid-area:amt;text-align:right}.inv .num{grid-area:num;width:auto;font-size:11.5px}.inv .st{grid-area:st;justify-self:end}
+.st{font:600 10px var(--mono);letter-spacing:.06em;text-transform:uppercase;border-radius:999px;padding:2px 8px;border:1px solid var(--line);color:var(--muted)}
+.st-draft{color:#7a5a00;border-color:#d8c58a;background:color-mix(in srgb,#d8a800 10%,var(--surface))}
+.st-issued{color:var(--crimson);border-color:color-mix(in srgb,var(--crimson) 40%,var(--line))}
+.st-paid{color:#2f7d3b;border-color:#a8c9a6;background:color-mix(in srgb,#2f7d3b 9%,var(--surface))}
+.st-void{color:#b3273a;border-color:#d9a3ab;text-decoration:line-through}
+.fab svg,.center-action .fab{transition:transform .22s cubic-bezier(.2,.8,.2,1)}
+.fab.spin svg{transform:rotate(45deg)}.center-action .fab.spin{transform:rotate(45deg)}
+.fab:active{transform:scale(.96)}
+@keyframes viewIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+section.enter{animation:viewIn .22s ease-out}
+input::placeholder,textarea::placeholder{font-style:italic;opacity:.6}
+.savedline{margin:-8px 0 14px;font:600 12px var(--mono);color:#2f7d3b}
+.inv-actions{margin:0 0 16px}.inv-head{display:flex;justify-content:flex-start;margin-bottom:10px}
+.act-primary{display:grid;grid-template-columns:1fr 1fr;gap:10px}.act-primary .btn{width:100%;min-height:50px}
+.act-primary .btn:only-child,.act-primary.one{grid-template-columns:1fr}
+.act-secondary{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px}.act-secondary .btn{width:100%;padding:10px 6px;font-size:14px;min-height:44px}
+.act-secondary.two{grid-template-columns:1fr 1fr}
+.act-danger{display:flex;gap:18px;justify-content:center;margin-top:6px}.act-danger .destructive{margin-top:12px}
+.inv-actions [hidden]{display:none!important}
+.sheet{position:fixed;inset:0;z-index:60;background:rgba(20,16,12,.5);display:flex;align-items:flex-end;justify-content:center;padding:0 12px calc(12px + env(safe-area-inset-bottom,0px))}
+.sheetcard{width:100%;max-width:520px;background:var(--surface);border-radius:20px;padding:22px 18px 18px;box-shadow:var(--shadow);animation:viewIn .22s ease-out}
+.sheetcard h2{font:700 22px var(--sans);letter-spacing:-.03em;text-align:center}.sheetcard .hint{text-align:center;margin:4px 0 16px;font-family:var(--mono)}
+.tick{width:44px;height:44px;border-radius:50%;background:#2f7d3b;color:#fff;display:flex;align-items:center;justify-content:center;font-size:24px;margin:0 auto 10px}
+.sheet[hidden]{display:none}

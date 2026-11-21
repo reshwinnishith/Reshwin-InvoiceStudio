@@ -1,0 +1,23 @@
+const assert = require('node:assert/strict'); const IV = require('../invoice-view.js'); const esc = v => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+const from = { name: 'Fictional Studio', addr: '1 Example Street', pan: '', type: 'Savings', bank: 'Fictional Bank', branch: '', acc: '000123456789', ifsc: '' };
+const inv = { id: 'i', no: 'RESH-2026-007', date: '2026-11-20', client: { name: 'Client <b>', addr: 'Road', pan: 'ABCDE1234F', gstin: '' }, from, reg: 'Work & more', amountPaise: 1234500, taxRate: 18, taxPaise: 222210, totalPaise: 1456710, status: 'issued' };
+const m = IV.model(inv);
+assert.equal(m.numberText, 'RESH-2026-007'); assert.equal(m.title, 'Invoice'); assert.equal(m.statusLabel, 'Issued'); assert.equal(m.fileName, 'RESH-2026-007.pdf');
+assert.equal(m.subtotal, '₹12,345.00'); assert.equal(m.total, '₹14,567.10'); assert.equal(m.taxLabel, 'GST (18%)'); assert.equal(m.words, 'Rupees Fourteen Thousand Five Hundred Sixty Seven and Ten Paise Only');
+assert.deepEqual(m.bank.map(x => x[0]), ['Name', 'Account No.', 'Bank', 'Type'], 'empty optional bank fields are omitted, in every renderer');
+const d = IV.model({ ...inv, no: '', status: 'draft' }); assert.equal(d.title, 'Invoice — Draft'); assert.equal(d.numberText, 'Assigned when issued'); assert.equal(d.fileName, 'Draft-invoice.pdf'); assert.equal(d.isDraft, true);
+assert.equal(IV.model({ ...inv, status: 'void' }).title, 'Invoice — Void'); assert.equal(IV.model({ ...inv, status: undefined }).status, 'issued', 'legacy records without status count as issued');
+const html = IV.paperHtml(m, esc); assert.ok(!html.includes('<b>') && html.includes('Client &lt;b&gt;') && html.includes('Work &amp; more'), 'all content is escaped');
+assert.ok(html.includes('RESH-2026-007') && html.includes('₹14,567.10') && html.includes('p-bgrid'));
+assert.ok(!IV.paperHtml(IV.model({ ...inv, from: { name: 'N', addr: 'A' } }), esc).includes('p-bank'), 'no empty payment block');
+// Payment details: partial information is shown (never silently dropped); nothing is shown when nothing is saved.
+const only = IV.model({ ...inv, from: { name: 'N', addr: 'A', ifsc: 'FICT0000001' } }); assert.deepEqual(only.bank, [['Name', 'N'], ['IFSC', 'FICT0000001']]);
+const hasBlock = x => IV.paperHtml(IV.model(x), esc).includes('p-bank');
+assert.ok(hasBlock({ ...inv, from: { name: 'N', addr: 'A', acc: '123456' } }) && hasBlock({ ...inv, from: { name: 'N', addr: 'A', bank: 'B' } }));
+assert.ok(!hasBlock({ ...inv, from: { name: 'N', addr: 'A', pan: 'ABCDE1234F' } }), 'a PAN alone is not payment information');
+assert.ok(IV.plainText(only).includes('IFSC: FICT0000001'), 'copy-as-text also keeps partial payment details');
+const snap = IV.model({ ...inv, from: { ...from, acc: '111111' } }); assert.ok(snap.bank.some(([k, v]) => k === 'Account No.' && v === '111111'), 'the invoice uses its own issued snapshot');
+const t = IV.plainText(m); assert.ok(t.startsWith('INVOICE RESH-2026-007') && t.includes('Total: ₹14,567.10') && t.includes('Client <b>'), 'plain text keeps the user text verbatim (it is not HTML)');
+assert.ok(IV.plainText(d).startsWith('INVOICE (draft)'));
+assert.equal(IV.amountWords(100), 'Rupees One Only'); assert.equal(IV.amountWords(0), 'Rupees Zero Only'); assert.equal(IV.amountWords(10000000100), 'Rupees Ten Crore One Only');
+console.log('PASS: shared invoice model — numbers, drafts, status, escaping, optional fields, words');

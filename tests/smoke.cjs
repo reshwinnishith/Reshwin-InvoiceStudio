@@ -8,20 +8,25 @@ const source=fs.readFileSync('app.js','utf8');
 const store=new Map();
 const nodes=new Map();
 function node(id){
- return {id,value:'',textContent:'',innerHTML:'',disabled:false,hidden:false,dataset:{},className:'',style:{},
+ const n=node0(id);let html='';
+ Object.defineProperty(n,'innerHTML',{get(){return html+n.children.map(c=>c.innerHTML).join('');},set(v){html=String(v);n.children=[];}});
+ return n;
+}
+function node0(id){
+ return {id,value:'',textContent:'',disabled:false,hidden:false,dataset:{},className:'',style:{},
   classList:{add(){},remove(){}},children:[],clientWidth:400,handlers:{},attrs:{},
   focus(){},scrollIntoView(){},appendChild(x){this.children.push(x)},replaceChildren(){this.children=[]},
   addEventListener(t,fn){this.handlers[t]=fn},querySelectorAll(){return[]},setAttribute(k,v){this.attrs[k]=v},matches(){return false},closest(){return null}};
 }
 const get=id=>{if(!nodes.has(id))nodes.set(id,node(id));return nodes.get(id);};
 const context=vm.createContext({
- console,InvoiceCore:core,
+ console,InvoiceCore:core,InvoiceView:require('../invoice-view.js'),
  localStorage:{getItem:k=>store.get(k)??null,setItem:(k,v)=>{store.set(k,v)},removeItem:k=>store.delete(k)},
  location:{reload(){context.__reloads=(context.__reloads||0)+1;}},
  document:{getElementById:get,createElement:tag=>node(tag),addEventListener(){},querySelectorAll(){return[]},title:'test',visibilityState:'visible'},
  window:{scrollTo(){},addEventListener(t,fn){(context.__winHandlers=context.__winHandlers||{})[t]=fn;},print(){}},
  navigator:{onLine:true},confirm:()=>true,
- requestAnimationFrame:fn=>fn(),setTimeout:(fn)=>{return 1},clearTimeout(){},setInterval:()=>1,clearInterval(){},
+ requestAnimationFrame:fn=>fn(),setTimeout:(fn)=>{setImmediate(fn);return 1},clearTimeout(){},setInterval:()=>1,clearInterval(){},
  Blob,URL:{createObjectURL:()=>'',revokeObjectURL(){}}
 });
 vm.runInContext(source,context,{filename:'app.js'});
@@ -147,12 +152,57 @@ function makeFake(){
  await click('g_go'); assert.equal(run('state.invoices.length'),1); assert.equal(run('state.invoices[0].status'),'draft'); assert.equal(run('state.invoices[0].no'),'');
  assert.equal(visible()[0],'invoice'); assert.match(get('paper').innerHTML,/Assigned when issued/); assert.ok(!get('paper').innerHTML.includes('<img src'),'invoice paper escapes content');
  assert.equal(get('issueInv').hidden,false);assert.equal(get('deleteInv').hidden,false);
- await click('issueInv'); assert.match(toasts(),/RESH-2026-001 issued/); assert.equal(run('state.invoices[0].status'),'issued');
+ await click('issueInv'); assert.equal(get('issueSheet').hidden,false,'success sheet appears only after the server-confirmed issue'); assert.equal(get('is_num').textContent,'RESH-2026-001'); assert.equal(run('state.invoices[0].status'),'issued');
+ await click('is_done'); assert.equal(get('issueSheet').hidden,true);
  assert.equal(get('editInv').hidden,true);assert.equal(get('deleteInv').hidden,true);assert.match(get('paper').innerHTML,/RESH-2026-001/);
  run("openInvoiceEditor(state.invoices[0].id)");assert.match(toasts(),/cannot be edited/);
  await click('paidInv');assert.equal(run('state.invoices[0].status'),'paid');
  await click('voidInv');assert.equal(run('state.invoices[0].status'),'paid','paid invoices cannot be voided');
 
+ /* ---- UX: single list with All / Drafts / Issued filters ---- */
+ run("history=[];show('home');paintView()");
+ assert.equal(String(get('n_all').textContent),'1');assert.equal(String(get('n_drafts').textContent),'0');assert.equal(String(get('n_issued').textContent),'1');
+ await click('flt_drafts');assert.match(get('iblist').innerHTML,/No drafts/);assert.equal(get('flt_drafts').attrs['aria-selected'],'true');assert.equal(get('flt_all').attrs['aria-selected'],'false');
+ await click('flt_issued');assert.match(get('iblist').innerHTML,/st-paid/,'paid invoices are listed under Issued but keep their true status');assert.match(get('iblist').innerHTML,/RESH-2026-001/);
+ // a second, draft invoice (the FAB path also covers motion)
+ context.matchMedia=()=>({matches:false});
+ run("globalThis.__opens=0;const _o=openInvoiceEditor;openInvoiceEditor=(...a)=>{globalThis.__opens++;return _o(...a);}");
+ get('fab').onclick();assert.equal(run('springing'),true,'FAB is mid-animation');get('fab').onclick();await settle();assert.equal(run('view'),'generate','editor opens after the animation');assert.equal(run('__opens'),1,'a double tap opens the editor exactly once');assert.equal(run('springing'),false);
+ get('g_client').value=cid;get('g_reg').value='Second job';get('g_amt').value='500';get('g_date').value='2026-11-21';get('g_tax').value='0';await click('g_go');
+ run("history=[];show('home');paintView()");await click('flt_all');
+ assert.equal(String(get('n_all').textContent),'2');assert.equal(String(get('n_drafts').textContent),'1');assert.equal(String(get('n_issued').textContent),'1');
+ assert.match(get('iblist').innerHTML,/st-draft/);assert.match(get('iblist').innerHTML,/st-paid/);assert.equal(get('iblist').children.length,2,'no record duplicated or dropped');
+ await click('flt_drafts');assert.equal(get('iblist').children.length,1);assert.ok(!/st-paid/.test(get('iblist').innerHTML));
+ await click('flt_issued');assert.equal(get('iblist').children.length,1);assert.ok(!/st-draft/.test(get('iblist').innerHTML));
+ await click('flt_all');
+ // reduced motion: no delay at all
+ context.matchMedia=()=>({matches:true});run("history=[];show('home')");get('fab').onclick();assert.equal(run('view'),'generate','reduced motion opens immediately');assert.equal(run('springing'),false);context.matchMedia=undefined;
+ // Add Client button uses the same motion
+ run("go('clients')");get('addClient').onclick();await settle();assert.equal(run('view'),'client-edit');
+ /* ---- UX: saved values are real values; hints only when empty ---- */
+ run("history=[];show('home')");await click('navDetails');
+ assert.equal(get('f_name').value,'Fictional Sender');assert.equal(get('f_bank').value,'Bank');assert.equal(get('f_saved').hidden,false);assert.equal(get('f_hint').hidden,true,'no empty-form hint above populated details');
+ for(const id of ['f_type','f_bank','f_branch']){assert.ok(!/HDFC|Shenoy|Savings$/.test(get(id).value)||id==='f_type','no sample bank data is ever filled in');}
+ const html=fs.readFileSync('index.html','utf8');assert.ok(!/HDFC|Shenoy Nagar|Live performance fee/.test(html),'no misleading sample data in placeholders');
+ assert.match(html,/id="g_amt" inputmode="decimal"/,'iPhone decimal keypad for amounts');
+ /* ---- UX: share / download only act on a confirmed invoice; cancelled sheets lose nothing ---- */
+ const shareCalls=[];let shareResult='shared';
+ context.window.InvoicePDF={share:async inv=>{shareCalls.push(inv.no);if(shareResult==='throw')throw Error('boom');return shareResult;},download:async inv=>{shareCalls.push('dl:'+inv.no);}};
+ run("history=[];show('home');paintView()");await click('flt_issued');get('iblist').children;run("showInvoice(state.invoices.find(x=>x.no).id)");await settle();
+ assert.equal(get('shareInv').hidden,false);assert.equal(get('issueInv').hidden,true);assert.equal(get('dl').hidden,false);assert.equal(get('editInv').hidden,true);assert.equal(get('deleteInv').hidden,true);
+ get('toast').textContent='';shareResult='cancelled';await click('shareInv');assert.equal(get('toast').textContent,'','a dismissed share sheet is silent');assert.equal(run('view'),'invoice','context kept after cancel');
+ shareResult='downloaded';await click('shareInv');assert.equal(get('toast').textContent,'PDF downloaded');
+ shareResult='throw';await click('shareInv');assert.match(get('toast').textContent,/PDF unavailable/);assert.equal(get('shareInv').disabled,false,'button re-enabled after a failure');
+ assert.deepEqual(shareCalls.slice(0,1),['RESH-2026-001'],'only the issued invoice was shared');
+ // draft invoice: Issue is primary; no share/download-as-issued actions
+ run("showInvoice(state.invoices.find(x=>!x.no).id)");await settle();assert.equal(get('issueInv').hidden,false);assert.equal(get('shareInv').hidden,true);assert.equal(get('dl2').hidden,false);assert.equal(get('deleteInv').hidden,false);assert.equal(get('copy').hidden,true);
+ // issuing: the sheet appears only after the confirmed write; Share inside the sheet shares the NEW number
+ shareResult='shared';shareCalls.length=0;fake.failNext=new CloudError('offline','You appear to be offline. Nothing was saved.');
+ await click('issueInv');assert.equal(get('issueSheet').hidden,true,'no success sheet when the issue failed');assert.equal(shareCalls.length,0,'nothing is shared before a confirmed issue');
+ await click('issueInv');assert.equal(get('issueSheet').hidden,false);assert.equal(get('is_num').textContent,'RESH-2026-002');
+ await click('is_share');assert.deepEqual(shareCalls,['RESH-2026-002']);await click('is_dl');assert.deepEqual(shareCalls,['RESH-2026-002','dl:RESH-2026-002']);
+ await click('is_done');assert.equal(get('issueSheet').hidden,true);
+ context.window.InvoicePDF=undefined;
  /* failed write: no success message, no state change, no double counting */
  let before=run('state.clients.length');
  fake.failNext=new CloudError('offline','You appear to be offline. Nothing was saved.');

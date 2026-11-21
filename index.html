@@ -13,10 +13,11 @@ html{-webkit-text-size-adjust:100%}body{margin:0;font-family:Inter,system-ui,san
 @page{size:A4;margin:0}
 @media print{
   html,body{background:#fff!important}
-  body *{visibility:hidden}
-  #paper,#paper *{visibility:visible}
-  #paper{position:fixed;left:0;top:0;transform:none!important;box-shadow:none!important;margin:0!important}
-  #stage{height:auto!important}
+  .wrap>*:not(#v-invoice),#v-invoice>*:not(.stage),.toast,.netbanner,.sheet{display:none!important}
+  .wrap{display:block;padding:0;max-width:none}
+  #stage{height:auto!important;overflow:visible;margin:0;display:block}
+  #paper{transform:none!important;box-shadow:none!important;border:0;margin:0;width:794px}
+}
 }
 </style>
 <style>
@@ -137,7 +138,7 @@ select{appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns=
 
 /* invoice paper */
 .stage{display:flex;justify-content:center;overflow:hidden;margin-bottom:16px}
-.paper{width:794px;height:1123px;background:#fff;color:#1c1a18;flex:none;transform-origin:top center;
+.paper{width:794px;min-height:1123px;background:#fff;color:#1c1a18;flex:none;transform-origin:top center;
   display:flex;flex-direction:column;box-shadow:var(--shadow);border:1px solid #ded7cc;
   font-family:var(--sans);--ink:#1c1a18;--dim:#6f685f;--rule:#e4ddd2}
 .p-top{height:14px;background:#7c1d2b;position:relative;flex:none}
@@ -260,13 +261,18 @@ select{appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns=
   <section id="v-home">
     <div class="invoicebox">
       <div class="ibhead"><span class="h">Invoices</span><span class="c" id="ibcount"></span></div>
-      <div class="iblist" id="iblist"></div>
+      <div class="filters" role="tablist" aria-label="Filter invoices">
+        <button type="button" role="tab" id="flt_all" aria-selected="true" aria-controls="iblist">All <span class="n" id="n_all">0</span></button>
+        <button type="button" role="tab" id="flt_drafts" aria-selected="false" aria-controls="iblist">Drafts <span class="n" id="n_drafts">0</span></button>
+        <button type="button" role="tab" id="flt_issued" aria-selected="false" aria-controls="iblist">Issued <span class="n" id="n_issued">0</span></button>
+      </div>
+      <div class="iblist" id="iblist" role="tabpanel" aria-live="polite"></div>
     </div>
     <div class="homebar">
       <button class="navbtn" id="navDetails">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>
         <span>Your details</span></button>
-      <div class="fabwrap"><button class="fab" id="fab" aria-label="Generate invoice">
+      <div class="fabwrap"><button class="fab" id="fab" aria-label="New invoice">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button></div>
       <button class="navbtn" id="navClients">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="9" cy="8" r="3.4"/><path d="M2 20c0-3.5 3.3-5.5 7-5.5s7 2 7 5.5"/><path d="M16 5.2A3.4 3.4 0 0 1 16 11M22 20c0-2.8-1.8-4.6-4.3-5.2"/></svg>
@@ -281,8 +287,8 @@ select{appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns=
       <div class="hint">Pick a client, say what it was for, and the amount.</div>
       <div class="form">
         <div class="f full"><label>To (client)</label><select id="g_client"></select></div>
-        <div class="f full"><label>Regarding</label><input id="g_reg" maxlength="4000" placeholder="Live performance fee (Bass) at ..."></div>
-        <div class="f"><label>Amount (INR)</label><input id="g_amt" inputmode="numeric" placeholder="25000"></div>
+        <div class="f full"><label>Regarding</label><input id="g_reg" maxlength="4000" placeholder="e.g. Design services for November"></div>
+        <div class="f"><label>Amount (INR)</label><input id="g_amt" inputmode="decimal" autocomplete="off" placeholder="0.00"></div>
         <div class="f"><label>Invoice date</label><input id="g_date" type="date"></div><div class="f full"><label for="g_tax">GST rate (only if applicable)</label><select id="g_tax"><option value="0">0% — no GST added</option><option value="5">5%</option><option value="12">12%</option><option value="18">18%</option><option value="28">28%</option></select><p class="field-help">Check with your accountant before charging GST. This app does not decide tax applicability.</p></div>
       </div>
       <div class="actions"><button class="btn" id="g_go">Generate invoice</button></div>
@@ -292,25 +298,27 @@ select{appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns=
   <!-- INVOICE -->
   <section id="v-invoice" hidden>
     <div class="stage" id="stage"><div class="paper" id="paper"></div></div>
-    <div class="actions">
-      <span id="invoiceStatus" class="status-pill" aria-live="polite"></span><button class="btn" id="dl">Download PDF</button><button class="btn sec" id="printInv">Print / Save as PDF</button><button class="btn sec" id="copy">Copy as text</button>
-      <button class="btn sec" id="editInv">Edit draft</button><button class="btn" id="issueInv">Issue invoice</button><button class="btn sec" id="paidInv">Mark paid</button><button class="btn sec" id="voidInv">Void invoice</button><button class="btn sec" id="duplicateInv">Duplicate</button><button class="btn sec" id="deleteInv">Delete draft</button><button class="btn sec" id="newInv">New invoice</button>
+    <div class="inv-actions">
+      <div class="inv-head"><span id="invoiceStatus" class="status-pill" aria-live="polite"></span></div>
+      <div class="act-primary"><button class="btn" id="issueInv">Issue invoice</button><button class="btn" id="shareInv">Share PDF</button><button class="btn" id="dl">Download PDF</button></div>
+      <div class="act-secondary"><button class="btn sec" id="editInv">Edit</button><button class="btn sec" id="dl2">Download</button><button class="btn sec" id="paidInv">Mark paid</button><button class="btn sec" id="copy">Copy text</button><button class="btn sec" id="printInv">Print</button><button class="btn sec" id="duplicateInv">Duplicate</button></div>
+      <div class="act-danger"><button class="destructive" id="deleteInv">Delete draft</button><button class="destructive" id="voidInv">Void invoice</button></div>
     </div>
-    <div class="note">Download PDF generates an A4 file. If it fails, use Print / Save as PDF (choose A4, margins None).</div>
+    <div class="note">PDFs match the invoice above (A4). If a PDF cannot be created, use Print and choose Save as PDF (A4, margins None).</div>
   </section>
 
   <!-- DETAILS -->
   <section id="v-details" hidden>
     <div class="panel">
       <h2>Your details</h2>
-      <div class="hint">Your sender details are saved in this browser. Existing invoices keep their original details.</div>
+      <div class="hint" id="f_hint">These appear on every new invoice. Existing invoices keep their original details.</div><div class="savedline" id="f_saved" hidden>✓ Saved to your account</div>
       <div class="form">
         <div class="f full"><label>Name or business</label><input id="f_name" maxlength="200"></div>
         <div class="f full"><label>Address</label><textarea id="f_addr" maxlength="2000" rows="4"></textarea></div>
         <div class="f"><label>PAN</label><input id="f_pan" maxlength="10"></div>
-        <div class="f"><label>Account type</label><input id="f_type" maxlength="40" placeholder="Savings"></div>
-        <div class="f"><label>Bank name</label><input id="f_bank" maxlength="200" placeholder="HDFC Bank"></div>
-        <div class="f"><label>Branch</label><input id="f_branch" maxlength="200" placeholder="Shenoy Nagar"></div>
+        <div class="f"><label>Account type</label><input id="f_type" maxlength="40" placeholder="e.g. Savings or Current"></div>
+        <div class="f"><label>Bank name</label><input id="f_bank" maxlength="200" placeholder="e.g. your bank's name"></div>
+        <div class="f"><label>Branch</label><input id="f_branch" maxlength="200" placeholder="e.g. branch name"></div>
         <div class="f"><label>Account number</label><input id="f_acc" maxlength="20"></div>
         <div class="f"><label>IFSC</label><input id="f_ifsc" maxlength="11"></div>
       </div>
@@ -359,10 +367,20 @@ select{appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns=
     </div>
   </section>
 </div>
+<div class="sheet" id="issueSheet" role="dialog" aria-modal="true" aria-labelledby="is_title" hidden>
+  <div class="sheetcard">
+    <div class="tick" aria-hidden="true">✓</div>
+    <h2 id="is_title" tabindex="-1">Invoice issued</h2>
+    <p class="hint" id="is_num"></p>
+    <div class="act-primary"><button class="btn" id="is_share">Share PDF</button><button class="btn" id="is_dl">Download PDF</button></div>
+    <div class="act-secondary two"><button class="btn sec" id="is_copy">Copy text</button><button class="btn sec" id="is_done">Done</button></div>
+  </div>
+</div>
 <div class="netbanner" id="netBanner" role="status" aria-live="polite" hidden></div>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script src="core.js" defer></script>
+<script src="invoice-view.js" defer></script>
 <script src="firebase-config.js" defer></script>
 <script src="pdf.js" defer></script>
 <script src="app.js" defer></script>
