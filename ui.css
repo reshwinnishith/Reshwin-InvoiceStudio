@@ -104,3 +104,29 @@ input::placeholder,textarea::placeholder{font-style:italic;opacity:.6}
 .sheetcard h2{font:700 22px var(--sans);letter-spacing:-.03em;text-align:center}.sheetcard .hint{text-align:center;margin:4px 0 16px;font-family:var(--mono)}
 .tick{width:44px;height:44px;border-radius:50%;background:#2f7d3b;color:#fff;display:flex;align-items:center;justify-content:center;font-size:24px;margin:0 auto 10px}
 .sheet[hidden]{display:none}
+
+/* ---- Smart Import (development flag) ---- */
+.devtag{font:600 11px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--gold);border:1px solid var(--gold);border-radius:6px;padding:1px 6px;vertical-align:middle}
+.si-onboard{margin-top:16px;display:flex;flex-direction:column;align-items:center;gap:10px;max-width:300px}
+.si-onboard p{margin:0;color:var(--muted);font-size:14px;line-height:1.45}.si-skip{color:var(--muted);font-size:12.5px}
+.si-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:16px}.si-actions .btn{width:100%;min-height:48px}
+.si-actions.one{grid-template-columns:1fr}
+.si-sec{margin:20px 0 6px;font:600 12px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.si-card{border:1px solid var(--line);border-radius:14px;padding:14px;margin:10px 0;background:var(--surface)}
+.si-card.off{opacity:.6}
+.si-head{display:flex;gap:10px;align-items:flex-start}.si-head input[type=checkbox]{width:22px;min-height:22px;margin-top:2px;flex:none}
+.si-head .t{font-weight:700;font-size:15px;overflow-wrap:anywhere}.si-head .s{font-size:12px;color:var(--muted);margin-top:2px}
+.si-field{margin-top:12px}.si-field label{display:flex;justify-content:space-between;gap:8px;align-items:baseline;text-transform:none;letter-spacing:0;font-size:12px;font-weight:600}
+.si-field input,.si-field textarea,.si-field select{min-height:44px;margin-top:5px}.si-field textarea{min-height:72px}
+.si-field.missing input,.si-field.missing textarea,.si-field.missing select{border-color:#d9a3ab;background:color-mix(in srgb,#b3273a 5%,var(--field))}
+.si-field.low input,.si-field.low textarea,.si-field.low select{border-color:#d8c58a;background:color-mix(in srgb,#d8a800 7%,var(--field))}
+.si-ev{font-size:11.5px;color:var(--muted);margin-top:4px;overflow-wrap:anywhere}.si-ev b{font-weight:600}
+.badge{font:600 10px var(--mono);text-transform:uppercase;border-radius:6px;padding:1px 6px;border:1px solid var(--line)}
+.badge.high{color:#2f7d3b}.badge.medium{color:#7a5a00}.badge.low{color:#b3273a}.badge.missing{color:#b3273a;border-color:#d9a3ab}.badge.edited{color:var(--crimson)}
+.si-warn{margin:6px 0;font-size:13px;line-height:1.4;overflow-wrap:anywhere}.si-warn.error{color:#b3273a}
+.si-note{font-size:12.5px;color:var(--muted);margin:8px 0 0}
+.si-files{margin:8px 0;padding-left:18px;font-size:13px}.si-files .bad{color:#b3273a}
+.si-head label{text-transform:none;letter-spacing:0;font-size:15px;font-weight:700;color:var(--fg);cursor:pointer}
+.si-head label .t{font-weight:700;font-size:15px}.si-head label .s{font-weight:500;font-size:12.5px;color:var(--muted);margin-top:2px}
+.si-card.blocked .si-head label{color:var(--muted)}
+@media(max-width:360px){.si-actions{grid-template-columns:1fr}}

@@ -246,6 +246,23 @@ select{appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns=
     </div>
   </section>
 
+  <!-- SMART IMPORT (development flag only; optional) -->
+  <section id="v-import" hidden>
+    <div class="panel si-panel">
+      <h2>Import from an invoice <span class="devtag">dev</span></h2>
+      <p class="hint">Have an old invoice? Drop it here. We’ll help set up your business, clients and first invoice. Files are read on this device only; nothing is saved until you approve it.</p>
+      <div id="si_input">
+        <div class="form one">
+          <div class="f full"><label for="si_files">Invoice PDFs or text files (up to 10)</label><input id="si_files" type="file" accept="application/pdf,.pdf,text/plain,.txt" multiple></div>
+          <div class="f full"><label for="si_text">…or paste an invoice or message</label><textarea id="si_text" rows="6" maxlength="200000"></textarea></div>
+        </div>
+        <p class="msg" id="si_msg" role="status" aria-live="polite" hidden></p>
+        <div class="si-actions"><button class="btn" id="si_go">Read invoices</button><button class="btn sec" id="si_skip">Start blank instead</button></div>
+      </div>
+      <div id="si_review" hidden></div>
+    </div>
+  </section>
+
   <!-- MIGRATE BROWSER DATA (preview only) -->
   <section id="v-migrate" hidden>
     <div class="panel">
@@ -363,7 +380,7 @@ select{appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns=
       <button class="setrow" id="setDetails"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg><span class="l">Your details</span><span class="ch"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></span></button>
       <button class="setrow" id="setClients"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="9" cy="8" r="3.4"/><path d="M2 20c0-3.5 3.3-5.5 7-5.5s7 2 7 5.5"/><path d="M16 5.2A3.4 3.4 0 0 1 16 11M22 20c0-2.8-1.8-4.6-4.3-5.2"/></svg><span class="l">Clients</span><span class="ch"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></span></button>
       <div class="syncrow"><span class="dot" id="syncDot"></span><span id="syncText">Synced</span></div>
-      <div class="actions"><button class="btn sec" id="exportBackup">Export backup</button><button class="btn sec" id="openMigrate" hidden>Import browser data…</button><button class="btn sec" id="signOut">Sign out</button></div><p class="note">Backups contain personal, client and bank details. Store them securely. Your data lives in your account and syncs between your devices when you are signed in.</p>
+      <div class="actions"><button class="btn sec" id="exportBackup">Export backup</button><button class="btn sec" id="openImport" hidden>Import from an invoice</button><button class="btn sec" id="openMigrate" hidden>Import browser data…</button><button class="btn sec" id="signOut">Sign out</button></div><p class="note">Backups contain personal, client and bank details. Store them securely. Your data lives in your account and syncs between your devices when you are signed in.</p>
     </div>
   </section>
 </div>
@@ -384,6 +401,8 @@ select{appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns=
 <script src="firebase-config.js" defer></script>
 <script src="pdf.js" defer></script>
 <script src="app.js" defer></script>
+<script src="smartimport.js" defer></script>
+<script src="smartimport-ui.js" defer></script>
 <script type="module" src="boot.mjs"></script>
 
 </body>

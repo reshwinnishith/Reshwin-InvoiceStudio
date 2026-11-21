@@ -14,7 +14,14 @@ jobs:
       - run: node --check app.js
       - run: node --check pdf.js
       - run: node --check core.js
+      - run: node --check invoice-view.js
+      - run: node --check smartimport.js
+      - run: node --check smartimport-ui.js
       - run: node --check cloud.mjs
       - run: node --check boot.mjs
       - run: node tests/core.test.cjs
       - run: node tests/smoke.cjs
+      - run: node tests/invoice-view.test.cjs
+      - run: npm ci --ignore-scripts
+      - run: node tests/vendor.test.cjs
+      - run: npm run test:smartimport

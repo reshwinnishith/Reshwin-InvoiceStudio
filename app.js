@@ -12,10 +12,10 @@ let state=newState(), view='loading', history=[], editingClient=null, viewingCli
 let pendingInvoice=null, cloud=null, ws=null, sessionUid=null, synced=false, offline=false, busy=false, authMode='in', resendTimer=null, migrationPlan=null;
 const MIN_PASSWORD=8;
 const AUTH_VIEWS=['loading','welcome','verify','reset'];
-const VIEWS=['loading','welcome','verify','reset','home','generate','invoice','details','clients','client','client-edit','settings','migrate'];
+const VIEWS=['import','loading','welcome','verify','reset','home','generate','invoice','details','clients','client','client-edit','settings','migrate'];
 const GEAR='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 1 1-14 0 7 7 0 0 1 14 0Z"/></svg>';
 const ARROW='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 6l-6 6 6 6"/></svg>';
-const TITLES={generate:'Invoice editor',invoice:'Invoice',details:'Your Details',clients:'Clients',client:'Client Details','client-edit':'Edit Client',settings:'Settings',migrate:'Import browser data'};
+const TITLES={generate:'Invoice editor',invoice:'Invoice',details:'Your Details',clients:'Clients',client:'Client Details','client-edit':'Edit Client',settings:'Settings',import:'Import from an invoice',migrate:'Import browser data'};
 const id = () => (globalThis.crypto?.randomUUID?.() || ('id-'+Date.now()+'-'+Math.random().toString(36).slice(2)));
 function esc(v){return String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
 function toast(msg){const e=$('toast');e.textContent=msg;e.classList.add('show');clearTimeout(toast.timer);toast.timer=setTimeout(()=>e.classList.remove('show'),3200);}
@@ -97,7 +97,9 @@ async function perform(button,fn){
 }
 
 /* ---------- account / session ---------- */
+const teardownHooks=[];
 function teardown(){
+ for(const h of teardownHooks){try{h();}catch(e){}}
  const w=ws;ws=null;sessionUid=null;
  try{w?.close();}catch(e){}
  state=newState();synced=false;offline=false;history=[];homeFilter='all';sheetInv=null;if($('issueSheet'))$('issueSheet').hidden=true;
@@ -302,7 +304,9 @@ function renderInvoices(){
  if(!list.length){
   box.className='ibempty';
   const msg={all:['No invoices yet','Tap + to create your first invoice.'],drafts:['No drafts','Drafts you start but have not issued appear here.'],issued:['Nothing issued yet','Issued, paid and void invoices appear here.']}[homeFilter];
-  box.innerHTML='<div class="big">'+msg[0]+'</div><div class="sub">'+msg[1]+'</div>';return;
+  box.innerHTML='<div class="big">'+msg[0]+'</div><div class="sub">'+msg[1]+'</div>'+(homeFilter==='all'&&globalThis.SMART_IMPORT_ENABLED?'<div class="si-onboard"><p>Have an old invoice? Drop it here. We’ll help set up your business, clients and first invoice.</p><button class="btn" id="siOnboard">Import from an invoice</button><span class="si-skip">or just tap + to start with a blank profile</span></div>':'');
+  const ob=$('siOnboard');if(ob)ob.onclick=()=>window.InvoiceApp.openSmartImport?.();
+  return;
  }
  box.className='iblist';
  list.forEach(inv=>{
@@ -537,3 +541,5 @@ function start(c,opts={}){
 }
 function fatal(message){showLoading('Invoice Studio could not start',message);}
 window.InvoiceApp={start,fatal};
+// Development-only extension point for Smart Import (activated by smartimport-ui.js behind the dev flag).
+window.InvoiceApp.ext=()=>({get state(){return state;},get ws(){return ws;},perform,toast,go,esc,show,paintView,back,setDirty:v=>{dirty=!!v;},onTeardown:fn=>{teardownHooks.push(fn);}});

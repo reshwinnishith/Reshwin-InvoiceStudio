@@ -1,0 +1,22 @@
+{
+  "package": "pdfjs-dist",
+  "version": "6.5.438",
+  "license": "Apache-2.0",
+  "npmIntegrity": "sha512-vg8Pw1x+AFKy4AMDvhuWl5cOYV8d698UoEANoFFhc79hqXDnZQqnOXoxw3HG907WHOg1JYOvLhP756boddFxpA==",
+  "source": "build/pdf.min.mjs, build/pdf.worker.min.mjs and LICENSE copied unmodified from the npm package",
+  "usage": "Loaded lazily, same-origin, only by Smart Import (development flag). No CDN, no network access, text extraction only.",
+  "files": {
+    "pdf.min.mjs": {
+      "sha256": "3a88402882cfa3e7e72c2c9b5149f52f0f88baf1c5b62aa11a41abdbc2072440",
+      "bytes": 474284
+    },
+    "pdf.worker.min.mjs": {
+      "sha256": "1e64c8240e54735ec5913b37acd5134747799cb8c6bb3777c70adbc01232d2aa",
+      "bytes": 1271915
+    },
+    "LICENSE": {
+      "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+      "bytes": 10174
+    }
+  }
+}
