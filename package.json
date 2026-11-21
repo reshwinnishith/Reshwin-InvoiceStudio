@@ -3,17 +3,20 @@
   "private": true,
   "type": "commonjs",
   "scripts": {
-    "check": "node --check app.js && node --check pdf.js && node --check core.js && node --check invoice-view.js && node --check cloud.mjs && node --check boot.mjs && node --check tests/smoke.cjs",
-    "test:unit": "node tests/core.test.cjs && node tests/invoice-view.test.cjs && node tests/smoke.cjs",
+    "check": "node --check app.js && node --check pdf.js && node --check core.js && node --check invoice-view.js && node --check cloud.mjs && node --check boot.mjs && node --check tests/smoke.cjs && node --check smartimport.js && node --check smartimport-ui.js",
+    "test:unit": "node tests/core.test.cjs && node tests/invoice-view.test.cjs && node tests/smoke.cjs && node tests/vendor.test.cjs",
     "test:emulator": "node scripts/run-emulator-tests.mjs",
     "test:e2e": "firebase emulators:exec --only auth,firestore --project demo-invoice-studio-v2 \"node tests/e2e/browser.e2e.mjs\"",
     "test": "npm run check && npm run test:unit && npm run test:emulator",
-    "test:parity": "node tests/e2e/pdf-parity.e2e.mjs"
+    "test:parity": "node tests/e2e/pdf-parity.e2e.mjs",
+    "test:smartimport": "node --test tests/smartimport.test.mjs",
+    "test:smartimport:e2e": "firebase emulators:exec --only auth,firestore --project demo-invoice-studio-v2 \"node tests/e2e/smartimport.e2e.mjs\""
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "5.0.2",
     "firebase": "12.19.0",
-    "pdfjs-dist": "^6.5.438",
+    "jspdf": "4.2.1",
+    "pdfjs-dist": "6.5.438",
     "playwright-core": "^1.49.0"
   },
   "engines": {
