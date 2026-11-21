@@ -1,67 +1,63 @@
 'use strict';
-/* Reshwin Invoice Studio — local-first, no accounts or external data transfers. */
-const STORAGE_KEY = 'reshwin-invoice-studio-v2';
-const ISSUED_STATUSES = ['issued','paid','void'];
+/* Reshwin Invoice Studio V2 — account-based. Private data lives in Firestore under users/{uid}/… and is held in memory only
+   while its owner is signed in with a verified email. The legacy browser copy (localStorage) is never read into an account
+   automatically, never written and never deleted by this file. */
+const LEGACY_KEY = 'reshwin-invoice-studio-v2';
+const Core = globalThis.InvoiceCore;
 const $ = id => document.getElementById(id);
 const today = () => { const d=new Date();return [d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-'); };
-const blankFrom = () => ({name:'',addr:'',pan:'',type:'',bank:'',branch:'',acc:'',ifsc:''});
-const newState = () => ({from:blankFrom(),clients:[],invoices:[],seq:1});
-let state=newState(), view='home', history=[], editingClient=null, viewingClient=null, editingInvoice=null, viewingInvoice=null, dirty=false, storageOK=true;
-const VIEWS=['home','generate','invoice','details','clients','client','client-edit','settings'];
+const blankFrom = () => Core.blankFrom();
+const newState = () => ({from:blankFrom(),senderToken:null,clients:[],invoices:[],counter:0});
+let state=newState(), view='loading', history=[], editingClient=null, viewingClient=null, editingInvoice=null, viewingInvoice=null, dirty=false;
+let pendingInvoice=null, cloud=null, ws=null, sessionUid=null, synced=false, offline=false, busy=false, authMode='in', resendTimer=null, migrationPlan=null;
+const AUTH_VIEWS=['loading','welcome','verify','reset'];
+const VIEWS=['loading','welcome','verify','reset','home','generate','invoice','details','clients','client','client-edit','settings','migrate'];
 const GEAR='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 1 1-14 0 7 7 0 0 1 14 0Z"/></svg>';
 const ARROW='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 6l-6 6 6 6"/></svg>';
-const TITLES={generate:'Invoice editor',invoice:'Invoice',details:'Your Details',clients:'Clients',client:'Client Details','client-edit':'Edit Client',settings:'Settings'};
+const TITLES={generate:'Invoice editor',invoice:'Invoice',details:'Your Details',clients:'Clients',client:'Client Details','client-edit':'Edit Client',settings:'Settings',migrate:'Import browser data'};
 const id = () => (globalThis.crypto?.randomUUID?.() || ('id-'+Date.now()+'-'+Math.random().toString(36).slice(2)));
 function esc(v){return String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
-function toast(msg){const e=$('toast');e.textContent=msg;e.classList.add('show');clearTimeout(toast.timer);toast.timer=setTimeout(()=>e.classList.remove('show'),2500);}
-function load(){
- try{
-   const raw=localStorage.getItem(STORAGE_KEY);
-   if(!raw)return;
-   const data=JSON.parse(raw);
-   if(!data || !Array.isArray(data.clients) || !Array.isArray(data.invoices)) throw Error('Invalid saved data');
-   state={from:{...blankFrom(),...(data.from||{})},clients:data.clients,invoices:data.invoices,seq:Math.max(1,Number(data.seq)||1)};
-   // Never reuse a number even after deletions or restoring older data.
-   const greatest=state.invoices.reduce((m,x)=>Math.max(m,Number(String(x.no||'').match(/-(\d+)$/)?.[1])||0),0);
-   state.seq=Math.max(state.seq,greatest+1);
- }catch(e){storageOK=false;toast('Saved data could not be loaded; original browser data was not changed.');}
-}
-function save(){
- if(!storageOK)return false;
- try{localStorage.setItem(STORAGE_KEY,JSON.stringify(state));return true;}
- catch(e){storageOK=false;toast('Storage unavailable. Export a backup before closing.');return false;}
-}
+function toast(msg){const e=$('toast');e.textContent=msg;e.classList.add('show');clearTimeout(toast.timer);toast.timer=setTimeout(()=>e.classList.remove('show'),3200);}
+const parseAmount=Core.parseAmount;
+function money(paise){return '₹'+(Number(paise||0)/100).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});}
+function dateLabel(s){if(!Core.validDate(s))return '—';const [y,m,d]=s.split('-').map(Number);return new Date(y,m-1,d).toLocaleDateString('en-IN',{day:'numeric',month:'long',year:'numeric'});}
+
+/* ---------- navigation ---------- */
 function checkLeave(){
  if(!dirty)return true;
  if(!confirm('Discard your unsaved changes?'))return false;
  dirty=false;return true;
 }
-function go(next,{replace=false}={}){
- if(!VIEWS.includes(next)||!checkLeave())return;
- if(next!==view){if(!replace)history.push(view);view=next;}
- VIEWS.forEach(v=>{$('v-'+v).hidden=v!==view});
- renderBar();
+function show(next){
+ view=next;VIEWS.forEach(v=>{const e=$('v-'+v);if(e)e.hidden=v!==view});renderBar();window.scrollTo(0,0);
+ // Move keyboard/screen-reader focus to the new screen's heading.
+ const h=$('v-'+view)?.querySelector?.('h2,.invoicebox .h');if(h){h.setAttribute('tabindex','-1');h.focus?.({preventScroll:true});}
+}
+function paintView(){
  if(view==='home')renderInvoices();
  if(view==='clients')renderClients();
  if(view==='invoice'){renderInvoice(viewingInvoice);requestAnimationFrame(scalePaper);}
- window.scrollTo(0,0);
+ if(view==='settings')renderSettings();
+}
+function go(next,{replace=false}={}){
+ if(!VIEWS.includes(next)||!checkLeave())return;
+ if(next!==view){if(!replace)history.push(view);}
+ show(next);paintView();
 }
 function back(){
  if(!checkLeave())return;
- let previous=history.pop()||'home';
- view=previous;VIEWS.forEach(v=>{$('v-'+v).hidden=v!==view});renderBar();
- if(view==='home')renderInvoices();
- if(view==='clients')renderClients();
- if(view==='invoice')renderInvoice(viewingInvoice);
- window.scrollTo(0,0);
+ const previous=history.pop()||'home';
+ show(previous);paintView();
 }
 function renderBar(){
  const bar=$('bar');
+ const brand='<span class="mark"></span><span class="brandtext"><span class="t">Reshwin Invoice Studio</span><span class="s">Simple invoicing</span></span>';
+ if(AUTH_VIEWS.includes(view)){bar.innerHTML=brand;return;}
  if(view==='home'){
-   bar.innerHTML='<span class="mark"></span><span class="brandtext"><span class="t">Reshwin Invoice Studio</span><span class="s">Simple invoicing</span></span><span class="spacer"></span><button class="iconbtn" id="setBtn" aria-label="Settings">'+GEAR+'</button>';
+   bar.innerHTML=brand+'<span class="spacer"></span><button class="iconbtn" id="setBtn" aria-label="Settings">'+GEAR+'</button>';
    $('setBtn').onclick=()=>go('settings');
  }else{
-   bar.innerHTML='<button class="iconbtn back" id="backBtn" aria-label="Back">'+ARROW+'</button><span class="bartitle">'+TITLES[view]+'</span>';
+   bar.innerHTML='<button class="iconbtn back" id="backBtn" aria-label="Back">'+ARROW+'</button><span class="bartitle">'+esc(TITLES[view]||'')+'</span>';
    $('backBtn').onclick=back;
  }
 }
@@ -72,16 +68,159 @@ function formValues(fields,prefix){return Object.fromEntries(fields.map(field=>[
 function fillFields(fields,prefix,obj){fields.forEach(field=>$(prefix+field).value=obj?.[field]||'');}
 const fromFields=['name','addr','pan','type','bank','branch','acc','ifsc'];
 const clientFields=['name','addr','pan','gstin'];
+
+/* ---------- write helper: one write at a time, success only after the server confirms ---------- */
+async function perform(button,fn){
+ if(busy)return false;
+ if(!ws){toast('Please sign in again');return false;}
+ if(offline||globalThis.navigator?.onLine===false){toast('You are offline. Nothing was saved.');return false;}
+ const w=ws;busy=true;if(button)button.disabled=true;
+ try{await fn(w);return true;}
+ catch(e){
+  if(w!==ws)return false; // account changed meanwhile: say nothing about the old account
+  toast(e?.message||'Could not save. Nothing was changed.');
+  if(e?.code==='conflict')paintView();
+  return false;
+ }finally{busy=false;if(button)button.disabled=false;}
+}
+
+/* ---------- account / session ---------- */
+function teardown(){
+ const w=ws;ws=null;sessionUid=null;
+ try{w?.close();}catch(e){}
+ state=newState();synced=false;offline=false;history=[];
+ editingClient=viewingClient=editingInvoice=viewingInvoice=null;dirty=false;migrationPlan=null;
+ for(const e of document.querySelectorAll('#v-home input,#v-generate input,#v-generate select,#v-details input,#v-details textarea,#v-client-edit input,#v-client-edit textarea,#v-generate textarea,#v-details select')){try{e.value='';}catch(_){}}
+ for(const idn of ['iblist','clientList','clientDetail','paper','mg_report'])if($(idn))$(idn).innerHTML='';
+ for(const idn of ['au_pass','au_pass2'])if($(idn))$(idn).value='';
+ $('netBanner').hidden=true;
+}
+function showLoading(title,text,{retry=false}={}){
+ $('ld_title').textContent=title;$('ld_text').textContent=text;$('ld_retry').hidden=!retry;$('ld_out').hidden=!retry;
+ show('loading');
+}
+function setMsg(el,text,kind){el.textContent=text||'';el.hidden=!text;el.className='msg'+(kind?' '+kind:'');}
+let knownUid=null;
+// The Firestore SDK keeps fetched documents in an in-memory cache for the life of the page. When the signed-in account
+// goes away or changes, discard private state and reload the page so no cached record can outlive its owner.
+function hardResetIfAccountEnded(s){
+ const ended=knownUid&&(s.status!=='ready'&&s.status!=='error'&&s.status!=='loading'||(s.status==='ready'&&s.uid!==knownUid));
+ if(!ended)return false;
+ knownUid=null;teardown();
+ try{globalThis.location?.reload?.();}catch(e){}
+ return false; // keep rendering the new state; the reload (if any) replaces the page right after
+}
+function onSession(s){
+ hardResetIfAccountEnded(s);
+ if(s.status==='ready')knownUid=s.uid;
+ if(s.status==='ready'){
+  if(sessionUid===s.uid&&ws)return;
+  teardown();sessionUid=s.uid;$('set_account').textContent='Signed in as '+s.email;
+  try{
+   ws=cloud.openWorkspace(s.uid,{onData,onError:e=>{if(e?.code==='permission'||!synced)showLoading('Could not open your workspace',e?.message||'Please try again.',{retry:true});}});
+  }catch(e){showLoading('Could not open your workspace',e?.message||'Please try again.',{retry:true});return;}
+  showLoading('Opening your workspace…','Loading your invoices.');
+  const name=String(s.email||'Account').split('@')[0].slice(0,200)||'Account';
+  ws.ensureProfile(name).catch(()=>{/* retried on next sign-in; profile is not needed to view data */});
+  return;
+ }
+ teardown();
+ if(s.status==='signedOut'){history=[];setAuthMode('in');setMsg($('au_msg'),'');show('welcome');}
+ else if(s.status==='unverified'){$('vf_email').textContent=s.email||'';setMsg($('vf_msg'),'');history=[];show('verify');}
+ else if(s.status==='error'){showLoading('Could not confirm your session',s.message||'Check your connection and retry.',{retry:true});}
+ else showLoading('Opening Invoice Studio…','Checking your sign-in.');
+}
+function onData(data,meta){
+ if(!ws)return;
+ const first=!synced;
+ state.from=data.sender||blankFrom();state.senderToken=data.senderToken??null;state.clients=data.clients;state.invoices=data.invoices;state.counter=data.counter;
+ offline=!!meta.offline;
+ if(!meta.ready)return;
+ synced=true;renderSync();
+ if(first){history=[];dirty=false;show('home');paintView();return;}
+ if(view==='invoice'&&viewingInvoice&&!state.invoices.some(x=>x.id===viewingInvoice)&&!pendingInvoice){viewingInvoice=null;show('home');history=[];toast('That invoice is no longer available');}
+ if(!dirty||['home','clients','invoice','settings'].includes(view))paintView();
+ if(pendingInvoice&&state.invoices.some(x=>x.id===pendingInvoice))pendingInvoice=null;
+}
+function renderSync(){
+ const online=!offline&&globalThis.navigator?.onLine!==false;
+ $('netBanner').hidden=online;
+ $('netBanner').textContent=online?'':'You are offline. Changes cannot be saved until you reconnect.';
+ const dot=$('syncDot');if(dot)dot.className='dot'+(online?' ok':' off');
+ const t=$('syncText');if(t)t.textContent=online?'Synced with your account':'Offline — showing the last loaded data; changes cannot be saved';
+}
+function renderSettings(){
+ renderSync();
+ let legacy=false;try{legacy=!!globalThis.localStorage?.getItem(LEGACY_KEY);}catch(e){}
+ $('openMigrate').hidden=!legacy;
+}
+
+/* ---------- auth screens ---------- */
+function setAuthMode(mode){
+ authMode=mode;const up=mode==='up';
+ $('au_tab_in').setAttribute('aria-selected',String(!up));$('au_tab_up').setAttribute('aria-selected',String(up));
+ $('au_heading').textContent=up?'Create your account':'Welcome back';
+ $('au_hint').textContent=up?'One private workspace for your invoices, clients and details.':'Sign in to your private invoice workspace.';
+ $('au_confirm_row').hidden=!up;$('au_pass_help').hidden=!up;$('au_forgot').hidden=up;
+ $('au_pass').setAttribute('autocomplete',up?'new-password':'current-password');
+ $('au_submit').textContent=up?'Create account':'Sign in';setMsg($('au_msg'),'');
+}
+const EMAIL_OK=e=>Core.RE.email.test(e);
+async function submitAuth(ev){
+ ev?.preventDefault?.();
+ if(busy)return;
+ const email=$('au_email').value.trim(),pass=$('au_pass').value;
+ if(!EMAIL_OK(email)){setMsg($('au_msg'),'Enter a valid email address.','err');return;}
+ if(!pass){setMsg($('au_msg'),'Enter your password.','err');return;}
+ if(authMode==='up'){
+  if(pass.length<12){setMsg($('au_msg'),'Choose a password of at least 12 characters.','err');return;}
+  if(pass!==$('au_pass2').value){setMsg($('au_msg'),'The two passwords do not match.','err');return;}
+ }
+ busy=true;$('au_submit').disabled=true;setMsg($('au_msg'),authMode==='up'?'Creating your account…':'Signing in…','');
+ try{
+  if(authMode==='up'){const r=await cloud.signUp(email,pass);if(!r.verificationSent)toast('Account created, but the verification email could not be sent. Use “Resend email”.');}
+  else await cloud.signIn(email,pass);
+  $('au_pass').value='';$('au_pass2').value='';
+ }catch(e){setMsg($('au_msg'),cloud.describeAuthError(e),'err');}
+ finally{busy=false;$('au_submit').disabled=false;}
+}
+async function submitReset(ev){
+ ev?.preventDefault?.();
+ const email=$('rs_email').value.trim();
+ if(!EMAIL_OK(email)){setMsg($('rs_msg'),'Enter a valid email address.','err');return;}
+ $('rs_submit').disabled=true;
+ try{await cloud.requestPasswordReset(email);setMsg($('rs_msg'),'If an account exists for that address, a reset link is on its way. Check your inbox and spam folder.','ok');}
+ catch(e){setMsg($('rs_msg'),cloud.describeAuthError(e),'err');}
+ finally{$('rs_submit').disabled=false;}
+}
+async function checkVerified(){
+ $('vf_check').disabled=true;setMsg($('vf_msg'),'Checking…','');
+ try{const s=await cloud.refreshVerification();if(s.status==='unverified')setMsg($('vf_msg'),'Not verified yet. Open the link in the email we sent, then tap this button again.','err');}
+ catch(e){setMsg($('vf_msg'),cloud.describeAuthError(e),'err');}
+ finally{$('vf_check').disabled=false;}
+}
+async function resendVerification(){
+ $('vf_resend').disabled=true;
+ try{await cloud.resendVerification();setMsg($('vf_msg'),'Verification email sent again. It may take a minute.','ok');startResendCooldown(60);}
+ catch(e){setMsg($('vf_msg'),e?.code==='cooldown'?e.message:cloud.describeAuthError(e),'err');if(e?.code==='cooldown')startResendCooldown(60);else $('vf_resend').disabled=false;}
+}
+function startResendCooldown(sec){
+ clearInterval(resendTimer);let left=sec;const b=$('vf_resend');b.disabled=true;b.textContent='Resend in '+left+'s';
+ resendTimer=setInterval(()=>{left--;if(left<=0){clearInterval(resendTimer);b.disabled=false;b.textContent='Resend email';}else b.textContent='Resend in '+left+'s';},1000);
+}
+async function signOutNow(){
+ if(dirty&&!confirm('You have unsaved changes. Sign out anyway?'))return;
+ dirty=false;
+ try{await cloud.signOut();}catch(e){toast('Could not sign out. Try again.');}
+}
+
+/* ---------- details & clients ---------- */
 function showDetails(){fillFields(fromFields,'f_',state.from);dirty=false;go('details');}
-function saveDetails(){
- const f=formValues(fromFields,'f_');
- if(!f.name||!f.addr){toast('Enter your name and address');return;}
- if(f.pan&&!/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(f.pan.toUpperCase())){toast('Check the PAN format');return;}
- f.pan=f.pan.toUpperCase();
- if(f.ifsc&&!/^[A-Z]{4}0[A-Z0-9]{6}$/.test(f.ifsc.toUpperCase())){toast('Check IFSC format');return;}
- f.ifsc=f.ifsc.toUpperCase();
- if(f.acc&&!/^\d{6,20}$/.test(f.acc)){toast('Check bank account number');return;}
- const previous=state.from;state.from=f;if(!save()){state.from=previous;return;}dirty=false;toast('Details saved');back();
+async function saveDetails(){
+ const v=Core.validateSender(formValues(fromFields,'f_'));
+ if(v.error){toast(v.error);return;}
+ const ok=await perform($('f_save'),w=>w.saveSender(v.value,state.senderToken));
+ if(ok){dirty=false;toast('Details saved');back();}
 }
 function renderClients(){
  const box=$('clientList');box.innerHTML='';
@@ -109,26 +248,23 @@ function openClientEditor(clientId=null){
  dirty=false;
  go('client-edit');
 }
-function saveClient(){
- const c=formValues(clientFields,'ce_');
- if(!c.name){toast('Enter a client name');return;}
- c.pan=c.pan.toUpperCase();c.gstin=c.gstin.toUpperCase();
- if(c.pan&&!/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(c.pan)){toast('Check client PAN');return;}
- if(c.gstin&&!/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][0-9A-Z]Z[0-9A-Z]$/.test(c.gstin)){toast('Check GSTIN');return;}
- if(c.pan&&c.gstin&&c.gstin.slice(2,12)!==c.pan){toast('Client GSTIN must match client PAN');return;}
- const previous=state.clients.map(client=>({...client}));
- if(editingClient){const i=state.clients.findIndex(x=>x.id===editingClient);if(i<0)return;state.clients[i]={...state.clients[i],...c};}
- else {editingClient=id();state.clients.push({id:editingClient,...c});}
- if(!save()){state.clients=previous;return;}dirty=false;
- history=['home'];
- view='clients';VIEWS.forEach(v=>{$('v-'+v).hidden=v!==view});renderBar();renderClients();window.scrollTo(0,0);toast('Client saved');
+async function saveClient(){
+ const v=Core.validateClient(formValues(clientFields,'ce_'));
+ if(v.error){toast(v.error);return;}
+ const token=editingClient?state.clients.find(x=>x.id===editingClient)?.updateToken:undefined;
+ const ok=await perform($('ce_save'),w=>w.saveClient(v.value,editingClient,token));
+ if(ok){dirty=false;history=['home'];show('clients');paintView();toast('Client saved');}
 }
-function deleteClient(){
- const i=state.clients.findIndex(x=>x.id===editingClient);if(i<0)return;
+async function deleteClient(){
+ if(!editingClient)return;
  if(!confirm('Remove this client? Existing invoices will remain unchanged.'))return;
- const removed=state.clients[i];state.clients.splice(i,1);if(!save()){state.clients.splice(i,0,removed);return;}dirty=false;history=[];
- go('clients',{replace:true});toast('Client removed');
+ const target=editingClient;
+ const ok=await perform($('ce_delete'),w=>w.deleteClient(target));
+ if(ok){dirty=false;history=['home'];editingClient=null;show('clients');paintView();toast('Client removed');}
 }
+
+/* ---------- invoices ---------- */
+function invoiceStatus(inv){return Core.STATUSES.includes(inv?.status)?inv.status:'issued';}
 function renderInvoices(){
  const box=$('iblist');box.innerHTML='';
  $('ibcount').textContent=state.invoices.length+' '+(state.invoices.length===1?'invoice':'invoices');
@@ -136,17 +272,10 @@ function renderInvoices(){
  box.className='iblist';
  state.invoices.forEach(inv=>{
   const b=document.createElement('button');b.className='inv';
-  b.innerHTML='<span class="num">'+esc(inv.no)+'</span><span class="cn">'+esc(inv.client?.name||'Client')+'</span><span class="amt">'+esc(money(inv.totalPaise??inv.amountPaise))+'</span>';
+  b.innerHTML='<span class="num">'+esc(inv.no||'Draft')+'</span><span class="cn">'+esc(inv.client?.name||'Client')+'</span><span class="amt">'+esc(money(inv.totalPaise??inv.amountPaise))+'</span>';
   b.onclick=()=>showInvoice(inv.id);box.appendChild(b);
  });
 }
-function money(paise){return '₹'+(Number(paise||0)/100).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});}
-function parseAmount(s){
- if(!/^\d+(?:\.\d{1,2})?$/.test(s.trim()))return null;
- const n=Number(s);if(!Number.isFinite(n)||n<=0||n>100000000)return null;
- return Math.round(n*100);
-}
-function dateLabel(s){if(!/^\d{4}-\d{2}-\d{2}$/.test(s))return '—';const [y,m,d]=s.split('-').map(Number);const dt=new Date(y,m-1,d);if(dt.getFullYear()!==y||dt.getMonth()!==m-1||dt.getDate()!==d)return '—';return dt.toLocaleDateString('en-IN',{day:'numeric',month:'long',year:'numeric'});}
 function fillClients(selected){
  const s=$('g_client');s.replaceChildren();
  if(!state.clients.length){
@@ -165,31 +294,22 @@ function openInvoiceEditor(invoiceId=null){
  $('g_amt').value=inv?(inv.amountPaise/100).toFixed(2):'';
  $('g_date').value=inv?.date||today();
  $('g_tax').value=String(inv?.taxRate??0);
- $('g_heading').textContent=inv?'Edit invoice':'New invoice';
- $('g_go').textContent=inv?'Save invoice':'Generate invoice';
+ $('g_heading').textContent=inv?'Edit draft':'New invoice';
+ $('g_go').textContent=inv?'Save draft':'Create draft';
  dirty=false;go('generate');
 }
-function submitInvoice(){
+async function submitInvoice(){
  if(!state.from.name||!state.from.addr){toast('Add Your Details before creating an invoice');return;}
  const client=state.clients.find(c=>c.id===$('g_client').value);
  if(!client){toast('Select a client');return;}
- const amountPaise=parseAmount($('g_amt').value);
- if(amountPaise===null){toast('Enter an amount with up to 2 decimal places');return;}
- const reg=$('g_reg').value.trim();
- if(!reg){toast('Describe the work');return;}
- const date=$('g_date').value;if(dateLabel(date)==='—'){toast('Choose a valid invoice date');return;}
- const taxRate=Number($('g_tax').value);
- if(![0,5,12,18,28].includes(taxRate)){toast('Choose a valid tax rate');return;}
- const taxPaise=Math.round(amountPaise*taxRate/100);
- if(taxRate>0&&!confirm('Confirm you are entitled to charge GST at the selected rate. The app does not determine your GST obligations.'))return;
+ const v=Core.validateInvoiceInput({amount:$('g_amt').value,reg:$('g_reg').value,date:$('g_date').value,taxRate:$('g_tax').value,clientId:client.id});
+ if(v.error){toast(v.error);return;}
+ if(v.value.taxRate>0&&!confirm('Confirm you are entitled to charge GST at the selected rate. The app does not determine your GST obligations.'))return;
  const old=state.invoices.find(x=>x.id===editingInvoice);
  if(old && invoiceStatus(old)!=='draft'){toast('Issued invoices cannot be edited. Duplicate to make a correction.');return;}
- const number=old?.no||('RESH-'+date.slice(0,4)+'-'+String(state.seq).padStart(3,'0'));
- const inv={id:old?.id||id(),no:number,date,clientId:client.id,client:{...client},from:{...state.from},reg,amountPaise,taxRate,taxPaise,totalPaise:amountPaise+taxPaise,status:'draft',createdAt:old?.createdAt||new Date().toISOString(),updatedAt:new Date().toISOString()};
- const before={invoices:state.invoices.slice(),seq:state.seq};
- if(old){state.invoices[state.invoices.indexOf(old)]=inv;}else{state.invoices.unshift(inv);state.seq++;}
- if(!save()){state.invoices=before.invoices;state.seq=before.seq;return;}
- dirty=false;editingInvoice=null;history=['home'];viewingInvoice=inv.id;go('invoice',{replace:true});toast('Invoice saved');
+ let savedId=null;
+ const ok=await perform($('g_go'),async w=>{savedId=await w.saveDraft(old?.id||null,v.value,client,state.from,old?.updateToken);});
+ if(ok){dirty=false;editingInvoice=null;history=['home'];viewingInvoice=savedId;pendingInvoice=savedId;show('invoice');paintView();toast('Draft saved. Issue it when it is ready.');}
 }
 const ONES=['','One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten','Eleven','Twelve','Thirteen','Fourteen','Fifteen','Sixteen','Seventeen','Eighteen','Nineteen'];
 const TENS=['','','Twenty','Thirty','Forty','Fifty','Sixty','Seventy','Eighty','Ninety'];
@@ -202,22 +322,24 @@ function words(n){
  }return parts.join(' ');
 }
 function amountWords(paise){const rupees=Math.floor(paise/100),p=paise%100;return 'Rupees '+words(rupees)+(p?' and '+words(p)+' Paise':'')+' Only';}
-function invoiceStatus(inv){return ['draft','issued','paid','void'].includes(inv?.status)?inv.status:'issued';}
-function updateInvoiceStatus(status){
+async function updateInvoiceStatus(status){
  const inv=state.invoices.find(x=>x.id===viewingInvoice);
  if(!inv)return;
  const old=invoiceStatus(inv);
- const valid={draft:['issued'],issued:['paid','void'],paid:[],void:[]};
- if(!valid[old].includes(status)){toast('This status change is not allowed');return;}
- const message=status==='issued'?'Issue this invoice? After issuing it, its details cannot be edited.':status==='paid'?'Mark this invoice as paid?':'Void this invoice? Its original record will remain for your records.';
+ if(!Core.canTransition(old,status)){toast('This status change is not allowed');return;}
+ const message=status==='issued'?'Issue this invoice? It will get its invoice number, and after issuing its details cannot be edited.':status==='paid'?'Mark this invoice as paid?':'Void this invoice? Its original record will remain for your records.';
  if(!confirm(message))return;
- const previous={...inv};
- inv.status=status;inv.updatedAt=new Date().toISOString();
- if(status==='issued')inv.issuedAt=inv.updatedAt;
- if(status==='paid')inv.paidAt=inv.updatedAt;
- if(status==='void')inv.voidedAt=inv.updatedAt;
- if(!save()){Object.assign(inv,previous);return;}
- renderInvoice(inv.id);toast('Invoice marked '+status);
+ let result=null;
+ const ok=await perform(null,async w=>{result=status==='issued'?await w.issue(inv.id,inv.updateToken):await w.setStatus(inv.id,status,inv.updateToken);});
+ if(ok)toast(status==='issued'?'Invoice '+result.number+' issued':'Invoice marked '+status);
+}
+async function deleteDraft(){
+ const inv=state.invoices.find(x=>x.id===viewingInvoice);
+ if(!inv||invoiceStatus(inv)!=='draft')return;
+ if(!confirm('Delete this draft? This cannot be undone.'))return;
+ const target=inv.id;
+ const ok=await perform($('deleteInv'),w=>w.deleteDraft(target));
+ if(ok){viewingInvoice=null;history=[];show('home');paintView();toast('Draft deleted');}
 }
 function duplicateInvoice(){
  const inv=state.invoices.find(x=>x.id===viewingInvoice);
@@ -232,23 +354,22 @@ function duplicateInvoice(){
  $('g_go').textContent='Create draft';
  dirty=false;go('generate');
 }
-function showInvoice(invoiceId){
- viewingInvoice=invoiceId;go('invoice');
-}
+function showInvoice(invoiceId){viewingInvoice=invoiceId;go('invoice');}
 function renderInvoice(invoiceId){
  const inv=state.invoices.find(x=>x.id===invoiceId);
- if(!inv)return;
+ if(!inv){$('paper').innerHTML='<div class="p-title">Loading…</div>';return;}
  const f=inv.from||blankFrom(),c=inv.client||{},subtotal=inv.amountPaise||0,tax=inv.taxPaise||0,total=inv.totalPaise??subtotal;
  const status=invoiceStatus(inv);
  $('invoiceStatus').textContent=status.charAt(0).toUpperCase()+status.slice(1);
  $('editInv').hidden=status!=='draft';
  $('issueInv').hidden=status!=='draft';
+ $('deleteInv').hidden=status!=='draft';
  $('paidInv').hidden=status!=='issued';
  $('voidInv').hidden=status!=='issued';
  const ctax=(c.pan?'<div><span class="k">PAN </span>'+esc(c.pan)+'</div>':'')+(c.gstin?'<div><span class="k">GSTIN </span>'+esc(c.gstin)+'</div>':'');
  $('paper').innerHTML=
  '<div class="p-top"></div><div class="p-title">Invoice'+(status==='draft'?' — Draft':status==='void'?' — Void':'')+'</div>'+
- '<div class="p-meta"><div><div class="p-ek">Invoice No.</div><div class="p-ev">'+esc(inv.no)+'</div></div><div><div class="p-ek">Invoice Date</div><div class="p-ev">'+dateLabel(inv.date)+'</div></div></div>'+
+ '<div class="p-meta"><div><div class="p-ek">Invoice No.</div><div class="p-ev">'+(inv.no?esc(inv.no):'Assigned when issued')+'</div></div><div><div class="p-ek">Invoice Date</div><div class="p-ev">'+dateLabel(inv.date)+'</div></div></div>'+
  '<div class="p-parties"><div><div class="p-lbl">From</div><div class="p-nm">'+esc(f.name)+'</div><div class="p-ad">'+esc(f.addr)+'</div>'+(f.pan?'<div class="p-tax">PAN '+esc(f.pan)+'</div>':'')+'</div>'+
  '<div><div class="p-lbl">Invoice To</div><div class="p-nm">'+esc(c.name)+'</div><div class="p-ad">'+esc(c.addr)+'</div><div class="p-tax">'+ctax+'</div></div></div>'+
  '<table class="p-items"><thead><tr><th>S.No</th><th>Description</th><th class="r">Amount</th></tr></thead><tbody><tr><td>01</td><td class="desc">'+esc(inv.reg)+'</td><td class="r">'+money(subtotal)+'</td></tr></tbody></table>'+
@@ -270,65 +391,108 @@ function scalePaper(){
 function copyInvoice(){
  const inv=state.invoices.find(x=>x.id===viewingInvoice);if(!inv)return;
  const f=inv.from,c=inv.client;
- const txt=['INVOICE '+inv.no,'Date: '+dateLabel(inv.date),'','From:',f.name,f.addr,'PAN: '+(f.pan||'—'),'','To:',c.name,c.addr,'',inv.reg,'Subtotal: '+money(inv.amountPaise),'GST ('+inv.taxRate+'%): '+money(inv.taxPaise),'Total: '+money(inv.totalPaise),amountWords(inv.totalPaise),'','Bank: '+f.bank,'Account: '+f.acc,'IFSC: '+f.ifsc].join('\n');
+ const txt=['INVOICE '+(inv.no||'(draft)'),'Date: '+dateLabel(inv.date),'','From:',f.name,f.addr,'PAN: '+(f.pan||'—'),'','To:',c.name,c.addr,'',inv.reg,'Subtotal: '+money(inv.amountPaise),'GST ('+inv.taxRate+'%): '+money(inv.taxPaise),'Total: '+money(inv.totalPaise),amountWords(inv.totalPaise),'','Bank: '+f.bank,'Account: '+f.acc,'IFSC: '+f.ifsc].join('\n');
  if(navigator.clipboard?.writeText)navigator.clipboard.writeText(txt).then(()=>toast('Copied'),()=>toast('Copy unavailable'));
  else toast('Clipboard requires a secure connection');
 }
+function download(name,text){
+ const blob=new Blob([text],{type:'application/json'});
+ const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),2000);
+}
 function exportBackup(){
- const blob=new Blob([JSON.stringify({version:2,exportedAt:new Date().toISOString(),...state},null,2)],{type:'application/json'});
- const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='invoice-studio-backup-'+today()+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),2000);toast('Backup downloaded');
+ download('invoice-studio-backup-'+today()+'.json',JSON.stringify({version:3,exportedAt:new Date().toISOString(),from:state.from,clients:state.clients.map(({updateToken,...c})=>c),invoices:state.invoices.map(({updateToken,...i})=>i)},null,2));
+ toast('Backup downloaded');
 }
-async function importBackup(file){
- if(!file)return;
- try{
-  const data=JSON.parse(await file.text());
-  if(!Array.isArray(data.clients)||!Array.isArray(data.invoices)||!data.from)throw Error('Invalid backup');
-  if(!confirm('Replace all invoices, clients and details in this browser with the backup?'))return;
-  const previous=state;state={from:{...blankFrom(),...data.from},clients:data.clients,invoices:data.invoices,seq:Math.max(1,Number(data.seq)||1)};
-  state.seq=Math.max(state.seq,state.invoices.reduce((m,x)=>Math.max(m,Number(String(x.no||'').match(/-(\d+)$/)?.[1])||0),0)+1);
-  if(!save()){state=previous;return;}
-  history=[];go('home',{replace:true});toast('Backup restored');
- }catch(e){toast('Not a valid Invoice Studio backup');}
+
+/* ---------- migration of the pre-account browser copy: preview, validate, back up. No writes. ---------- */
+function readLegacy(){
+ try{const raw=globalThis.localStorage?.getItem(LEGACY_KEY);return raw?JSON.parse(raw):null;}catch(e){return undefined;}
 }
-window.addEventListener('resize',scalePaper);
-window.addEventListener('beforeunload',e=>{if(dirty){e.preventDefault();e.returnValue='';}});
-$('fab').onclick=()=>openInvoiceEditor();
-$('navDetails').onclick=showDetails;
-$('navClients').onclick=()=>go('clients');
-$('setDetails').onclick=showDetails;
-$('setClients').onclick=()=>go('clients');
-$('f_save').onclick=saveDetails;
-$('addClient').onclick=()=>openClientEditor();
-$('viewEditClient').onclick=()=>openClientEditor(viewingClient);
-$('ce_save').onclick=saveClient;
-$('ce_cancel').onclick=back;
-$('ce_delete').onclick=deleteClient;
-$('g_go').onclick=submitInvoice;
-$('newInv').onclick=()=>openInvoiceEditor();
-$('editInv').onclick=()=>openInvoiceEditor(viewingInvoice);
-$('issueInv').onclick=()=>updateInvoiceStatus('issued');
-$('paidInv').onclick=()=>updateInvoiceStatus('paid');
-$('voidInv').onclick=()=>updateInvoiceStatus('void');
-$('duplicateInv').onclick=duplicateInvoice;
-$('dl').onclick=async()=>{
- const inv=state.invoices.find(x=>x.id===viewingInvoice);if(!inv)return;
- $('dl').disabled=true;
- try{await window.InvoicePDF.download(inv,{money,dateLabel,amountWords,invoiceStatus});toast('PDF downloaded');}
- catch(e){console.error('PDF download failed',e);toast('PDF unavailable. Use Print / Save as PDF.');}
- finally{$('dl').disabled=false;}
-};
-$('printInv').onclick=()=>{
- const t=document.title,inv=state.invoices.find(x=>x.id===viewingInvoice);
- document.title=inv?.no||'Invoice';window.print();setTimeout(()=>document.title=t,1000);
-};
-$('copy').onclick=copyInvoice;
-$('exportBackup').onclick=exportBackup;
-$('importBackup').onclick=()=>$('backupFile').click();
-$('backupFile').onchange=e=>{importBackup(e.target.files?.[0]);e.target.value='';};
-wireDirty('v-details');wireDirty('v-client-edit');wireDirty('v-generate');
-document.addEventListener('pointerdown',e=>{
- if(e.target?.closest?.('input,textarea,select,button,a,label'))return;
- if(document.activeElement?.matches?.('input,textarea,select'))document.activeElement.blur();
-});
-load();go('home',{replace:true});
-if(!storageOK)toast('Browser storage unavailable. Your changes may not survive refresh.');
+function openMigrate(){
+ const legacy=readLegacy();const box=$('mg_report');box.innerHTML='';
+ if(legacy===undefined){box.innerHTML='<p class="msg err">The browser data could not be read. It has not been changed.</p>';migrationPlan=null;}
+ else if(!legacy){box.innerHTML='<p class="empty">No browser data found.</p>';migrationPlan=null;}
+ else{
+  migrationPlan=Core.planMigration(legacy,{existing:{clients:state.clients,invoices:state.invoices,lastSequence:state.counter},now:new Date().toISOString()});
+  const s=migrationPlan.summary;
+  const li=a=>a.map(x=>'<li>'+esc(x)+'</li>').join('');
+  box.innerHTML=(s?'<ul class="mg-sum"><li><b>'+s.invoices+'</b> invoices ('+s.skippedInvoices+' already in this account)</li><li><b>'+s.clients+'</b> clients ('+s.skippedClients+' already in this account)</li><li>Highest historical number: <b>'+s.highestHistoricalSequence+'</b>; new invoices would continue from <b>'+s.nextSequenceAfterImport+'</b></li></ul>':'')+
+   (migrationPlan.errors.length?'<p class="msg err">Fix these before importing:</p><ul>'+li(migrationPlan.errors.slice(0,20))+'</ul>':'<p class="msg ok">Validation passed.</p>')+
+   (migrationPlan.warnings.length?'<p class="subhead">Notes</p><ul>'+li(migrationPlan.warnings.slice(0,20))+'</ul>':'')+
+   '<p class="subhead">Rollback plan</p><p class="note">'+esc(migrationPlan.rollback.note)+' '+migrationPlan.rollback.deletes.length+' documents would be tagged '+esc(migrationPlan.rollback.batchId)+'.</p>';
+ }
+ $('mg_backup').disabled=!migrationPlan?.backup;
+ $('mg_import').disabled=true;
+ $('mg_note').textContent='This data belongs to this browser, not to your account, and it is shown to whoever is signed in here. Importing is not enabled in this version. Download the backup now; a later release will add the confirmed import once its security rules are approved. Your browser copy is never deleted by this app.';
+ go('migrate');
+}
+
+/* ---------- wiring ---------- */
+function bind(){
+ for(const l of document.querySelectorAll('.f > label:not([for])')){const c=l.parentElement?.querySelector?.('input,select,textarea');if(c?.id)l.setAttribute('for',c.id);}
+ window.addEventListener('resize',scalePaper);
+ window.addEventListener('beforeunload',e=>{if(dirty){e.preventDefault();e.returnValue='';}});
+ window.addEventListener('online',renderSync);window.addEventListener('offline',renderSync);
+ document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&view==='verify'&&cloud&&!busy)checkVerified();});
+ $('fab').onclick=()=>openInvoiceEditor();
+ $('navDetails').onclick=showDetails;
+ $('navClients').onclick=()=>go('clients');
+ $('setDetails').onclick=showDetails;
+ $('setClients').onclick=()=>go('clients');
+ $('f_save').onclick=saveDetails;
+ $('addClient').onclick=()=>openClientEditor();
+ $('viewEditClient').onclick=()=>openClientEditor(viewingClient);
+ $('ce_save').onclick=saveClient;
+ $('ce_cancel').onclick=back;
+ $('ce_delete').onclick=deleteClient;
+ $('g_go').onclick=submitInvoice;
+ $('newInv').onclick=()=>openInvoiceEditor();
+ $('editInv').onclick=()=>openInvoiceEditor(viewingInvoice);
+ $('issueInv').onclick=()=>updateInvoiceStatus('issued');
+ $('paidInv').onclick=()=>updateInvoiceStatus('paid');
+ $('voidInv').onclick=()=>updateInvoiceStatus('void');
+ $('deleteInv').onclick=deleteDraft;
+ $('duplicateInv').onclick=duplicateInvoice;
+ $('dl').onclick=async()=>{
+  const inv=state.invoices.find(x=>x.id===viewingInvoice);if(!inv)return;
+  $('dl').disabled=true;
+  try{await window.InvoicePDF.download(inv,{money,dateLabel,amountWords,invoiceStatus});toast('PDF downloaded');}
+  catch(e){console.error('PDF download failed',e);toast('PDF unavailable. Use Print / Save as PDF.');}
+  finally{$('dl').disabled=false;}
+ };
+ $('printInv').onclick=()=>{
+  const t=document.title,inv=state.invoices.find(x=>x.id===viewingInvoice);
+  document.title=inv?.no||'Invoice';window.print();setTimeout(()=>document.title=t,1000);
+ };
+ $('copy').onclick=copyInvoice;
+ $('exportBackup').onclick=exportBackup;
+ $('openMigrate').onclick=openMigrate;
+ $('mg_backup').onclick=()=>{if(migrationPlan?.backup){download(migrationPlan.backup.fileName,migrationPlan.backup.body);toast('Backup downloaded (checksum '+migrationPlan.backup.checksum+')');}};
+ $('signOut').onclick=signOutNow;
+ $('au_tab_in').onclick=()=>setAuthMode('in');
+ $('au_tab_up').onclick=()=>setAuthMode('up');
+ $('au_form').addEventListener('submit',submitAuth);
+ $('au_forgot').onclick=()=>{$('rs_email').value=$('au_email').value.trim();setMsg($('rs_msg'),'');show('reset');};
+ $('rs_form').addEventListener('submit',submitReset);
+ $('rs_back').onclick=()=>{setAuthMode('in');show('welcome');};
+ $('vf_check').onclick=checkVerified;
+ $('vf_resend').onclick=resendVerification;
+ $('vf_out').onclick=signOutNow;
+ $('ld_retry').onclick=()=>{sessionUid=null;showLoading('Opening Invoice Studio…','Checking your sign-in.');cloud.refreshVerification().then(r=>{if(r?.status==='signedOut')onSession(r);}).catch(e=>showLoading('Could not confirm your session',cloud.describeAuthError(e),{retry:true}));};
+ $('ld_out').onclick=signOutNow;
+ wireDirty('v-details');wireDirty('v-client-edit');wireDirty('v-generate');
+ document.addEventListener('pointerdown',e=>{
+  if(e.target?.closest?.('input,textarea,select,button,a,label'))return;
+  if(document.activeElement?.matches?.('input,textarea,select'))document.activeElement.blur();
+ });
+}
+let bound=false;
+function start(c,opts={}){
+ cloud=c;
+ if(!bound){bind();bound=true;}
+ if(opts.emulator){const b=$('netBanner');b.dataset.emulator='1';document.title='[EMULATOR] '+document.title;}
+ showLoading('Opening Invoice Studio…','Checking your sign-in.');
+ cloud.onSession(onSession);
+}
+function fatal(message){showLoading('Invoice Studio could not start',message);}
+window.InvoiceApp={start,fatal};

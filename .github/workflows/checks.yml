@@ -13,4 +13,8 @@ jobs:
           node-version: '22'
       - run: node --check app.js
       - run: node --check pdf.js
+      - run: node --check core.js
+      - run: node --check cloud.mjs
+      - run: node --check boot.mjs
+      - run: node tests/core.test.cjs
       - run: node tests/smoke.cjs
