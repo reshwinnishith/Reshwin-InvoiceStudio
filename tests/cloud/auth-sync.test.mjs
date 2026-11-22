@@ -10,6 +10,18 @@ const seed = async u => {
   return cid;
 };
 
+test('metadata-only disconnect/reconnect updates workspace status without any document change', async () => {
+  const u = await readyUser(); let meta;
+  const ws = u.c.cloud.openWorkspace(u.uid, { onData: (_d, m) => { meta = m; } });
+  try {
+    await until(() => meta?.ready && !meta.offline, 'initial server snapshot');
+    await F.disableNetwork(u.c.db);
+    await until(() => meta.offline, 'cache-only snapshot');
+    await F.enableNetwork(u.c.db);
+    await until(() => !meta.offline, 'server confirmation with identical documents');
+  } finally { ws.close(); await u.c.close(); }
+});
+
 test('sign-up creates an unverified account that cannot reach private data until verified', async () => {
   const c = makeClient(); const email = freshEmail();
   const r = await c.cloud.signUp(email, PASSWORD);
@@ -205,4 +217,21 @@ test('closing a workspace detaches all listeners immediately', async () => {
   await u.ws.saveClient({ name: 'Another', addr: '', pan: '', gstin: '' });
   await sleep(500); assert.equal(calls, n);
   await u.c.close();
+});
+
+test('stale sender creation and stale client/draft deletions preserve newer records', async () => {
+  const u = await readyUser(); const cid = await seed(u);
+  try {
+    await assert.rejects(u.ws.saveSender(sender, null), e => e.code === 'conflict');
+    const ct = u.data().clients[0].updateToken;
+    await u.ws.saveClient({ ...client, name: 'Edited elsewhere' }, cid, ct);
+    await until(() => u.data().clients[0].updateToken !== ct, 'new client version');
+    await assert.rejects(u.ws.deleteClient(cid, ct), e => e.code === 'conflict');
+    const iid = await u.ws.saveDraft(null, input({ clientId: cid }), { id: cid, ...client }, sender);
+    await until(() => u.data().invoices.length === 1, 'draft'); const it = u.data().invoices[0].updateToken;
+    await u.ws.saveDraft(iid, input({ clientId: cid, reg: 'Updated draft' }), { id: cid, ...client }, sender, it);
+    await until(() => u.data().invoices[0].updateToken !== it, 'new draft version');
+    await assert.rejects(u.ws.deleteDraft(iid, it), e => e.code === 'conflict');
+    assert.equal(u.data().invoices.length, 1); assert.equal(u.data().clients.length, 1);
+  } finally { await u.c.close(); }
 });

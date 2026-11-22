@@ -7,7 +7,7 @@ import { FIXTURES } from './parity-fixtures.mjs';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..'); const out = process.env.SHOTS || fs.mkdtempSync(path.join(os.tmpdir(), 'parity-'));
 const mime = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css' };
 const hdr = Object.fromEntries(JSON.parse(fs.readFileSync(path.join(root, 'vercel.json'), 'utf8')).headers[0].headers.map(h => [h.key, h.value]));
-const srv = http.createServer((q, r) => { const u = new URL(q.url, 'http://x'); const f = path.join(root, u.pathname === '/' ? 'index.html' : u.pathname); if (!f.startsWith(root) || /node_modules|firebase-prep/.test(f) || !fs.existsSync(f) || fs.statSync(f).isDirectory()) { r.writeHead(404); return r.end(); } r.writeHead(200, { ...hdr, 'content-type': mime[path.extname(f)] || 'x/y' }); fs.createReadStream(f).pipe(r); }).listen(5179, '127.0.0.1');
+const srv = http.createServer((q, r) => { const u = new URL(q.url, 'http://x'); const f = path.join(root, u.pathname === '/' ? 'index.html' : u.pathname); if (!f.startsWith(root) || /node_modules|firebase-prep/.test(f) || !fs.existsSync(f) || fs.statSync(f).isDirectory()) { r.writeHead(404); return r.end(); } r.writeHead(200, { ...hdr, 'content-type': mime[path.extname(f)] || 'x/y' }); if (f.endsWith('index.html')) return r.end(fs.readFileSync(f, 'utf8').replace(/<script[^>]*src="(?:firebase-config\.js|boot\.mjs)"[^>]*><\/script>/g, '')); fs.createReadStream(f).pipe(r); }).listen(5179, '127.0.0.1');
 const results = []; const ok = (n, c, x = '') => { results.push([c ? 'PASS' : 'FAIL', n + (x ? ' — ' + x : '')]); if (!c) process.exitCode = 1; };
 const W = 794, H = 1123, norm = s => String(s).replace(/\s+/g, ' ').trim();
 const b = await chromium.launch({ executablePath: process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true });
@@ -63,6 +63,12 @@ for (const [name, inv] of Object.entries(FIXTURES)) {
       ok(`${name}: positions of title, number, parties, description, totals and words match the screen (±18px)`, checks.length === 0, checks.join('; '));
     }
   } catch (e) { ok(`${name}: aborted`, false, e.message.split('\n')[0]); }
+}
+for (const [label, text] of [['Devanagari', 'Fictional सेवा'], ['check mark', 'Fictional ✓']]) {
+  let unicodeRejected = false;
+  try { await render({ ...FIXTURES.issued, reg: text }); }
+  catch (e) { unicodeRejected = /Unicode font/.test(e.message); }
+  ok(`unsupported ${label} is refused with a print fallback instead of corrupting invoice text`, unicodeRejected);
 }
 ok('no console or page errors', errs.length === 0, errs.slice(0, 2).join(' | '));
 console.log(results.map(r => r.join(' ')).join('\n')); console.log('PDFs saved in', out); await b.close(); srv.close();

@@ -91,13 +91,16 @@
   const clientToDoc = c => ({ name: c.name, address: c.addr, pan: c.pan, gstin: c.gstin });
   const clientFromDoc = (id, d) => ({ id, name: str(d?.name), addr: str(d?.address), pan: str(d?.pan), gstin: str(d?.gstin) });
   const iso = t => (t && typeof t.toDate === 'function' ? t.toDate().toISOString() : t instanceof Date ? t.toISOString() : null);
+  // Retain Firestore's sub-millisecond precision for optimistic concurrency checks.
+  const timestampToken = t => t && Number.isInteger(t.seconds) && Number.isInteger(t.nanoseconds)
+    ? t.seconds + ':' + t.nanoseconds : t?.toMillis?.() ?? null;
   function invoiceFromDoc(id, d) {
     return {
       id, no: str(d.number), sequence: d.sequence || 0, date: str(d.date), clientId: str(d.clientId),
       client: clientFromDoc(d.clientId, d.clientSnapshot), from: senderFromDoc(d.senderSnapshot), reg: str(d.description),
       amountPaise: d.amountPaise, taxRate: d.taxRate, taxPaise: d.taxPaise, totalPaise: d.totalPaise, status: d.status,
       createdAt: iso(d.createdAt), updatedAt: iso(d.updatedAt), issuedAt: iso(d.issuedAt), paidAt: iso(d.paidAt), voidedAt: iso(d.voidedAt),
-      updateToken: d.updatedAt && typeof d.updatedAt.toMillis === 'function' ? d.updatedAt.toMillis() : null
+      updateToken: timestampToken(d.updatedAt)
     };
   }
   // Draft body written to Firestore. `status:'draft'` and an empty number are enforced again by the rules.
@@ -167,7 +170,8 @@
     });
     const gaps = [];
     const seqs = new Set(importInvoices.filter(x => x.status !== 'draft').map(x => x.sequence));
-    for (let n = 1; n <= maxSeq; n++) if (!seqs.has(n)) gaps.push(n);
+    // Only the first ten gaps are displayed. Never iterate up to an untrusted invoice number (up to 999,999,999).
+    for (let n = 1; n <= maxSeq && gaps.length < 11; n++) if (!seqs.has(n)) gaps.push(n);
     if (gaps.length) warnings.push('Historical numbering has gaps at: ' + gaps.slice(0, 10).join(', ') + (gaps.length > 10 ? '…' : '') + '. Gaps will be kept, not renumbered.');
     const nextSequence = Math.max(maxSeq, existing.lastSequence || 0) + 1;
     const backupBody = JSON.stringify({ version: 2, exportedAt: opts.now || null, from: legacy.from || null, clients: legacy.clients, invoices: legacy.invoices, seq: legacy.seq });
@@ -184,5 +188,5 @@
 
   return { SCHEMA_VERSION, LIMITS, TAX_RATES, STATUSES, RE, blankFrom, validDate, formatNumber, sequenceFromNumber, parseAmount, taxFor,
     validateSender, validateClient, validateInvoiceInput, canTransition, senderToDoc, senderFromDoc, clientToDoc, clientFromDoc,
-    invoiceFromDoc, draftToDoc, checksum, legacyStatus, planMigration };
+    invoiceFromDoc, timestampToken, draftToDoc, checksum, legacyStatus, planMigration };
 });

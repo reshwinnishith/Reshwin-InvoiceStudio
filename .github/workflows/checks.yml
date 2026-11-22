@@ -1,20 +1,31 @@
 name: Invoice Studio checks
 on:
   push:
-    branches: [main, feat/release-1-1-safety-firebase-readiness]
+    branches: [main, v2/auth-cloud-sync]
   pull_request:
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: node --check app.js
-      - run: node --check pdf.js
-      - run: node --check core.js
-      - run: node --check cloud.mjs
-      - run: node --check boot.mjs
-      - run: node tests/core.test.cjs
-      - run: node tests/smoke.cjs
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - run: npm ci
+      - run: npm install --global firebase-tools@15.20.0
+      - run: firebase setup:emulators:firestore
+      - run: echo "INVOICE_FIREBASE_LIB=$(npm root -g)/firebase-tools/lib/" >> "$GITHUB_ENV"
+      - run: npm test
+      - run: npm run test:e2e
+        env:
+          CHROME_PATH: /usr/bin/google-chrome
+      - run: npm run test:parity
+        env:
+          CHROME_PATH: /usr/bin/google-chrome

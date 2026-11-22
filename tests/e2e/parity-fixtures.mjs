@@ -15,5 +15,5 @@ export const FIXTURES = {
   longNames: { ...base, from: { ...from, name: 'Fictional Studio And Partners Creative Consultancy Limited Liability Partnership', addr: 'Unit 12, Fictional Business Park, Extremely Long Example Street Name, Sampletown, Exampleshire 000000' }, client: { ...client, name: 'Imaginary International Trading And Manufacturing Company Private Limited', addr: 'Floor 3, Block B, Imaginary Commercial Complex, Testville Industrial Area Phase Two, Testville 111111' } },
   longDescription: { ...base, reg: long },
   multiPage: { ...base, reg: huge, no: 'RESH-2026-016' },
-  specialChars: { ...base, reg: 'Café “quoted” – dash … ünïcode ✓ and <b>markup</b> & ampersand', client: { ...client, name: 'Ünïcode Cliënt & Sons' } }
+  specialChars: { ...base, reg: 'Café “quoted” – dash … ünïcode and <b>markup</b> & ampersand', client: { ...client, name: 'Ünïcode Cliënt & Sons' } }
 };

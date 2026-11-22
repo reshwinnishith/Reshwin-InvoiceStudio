@@ -10,6 +10,7 @@ const blankFrom = () => Core.blankFrom();
 const newState = () => ({from:blankFrom(),senderToken:null,clients:[],invoices:[],counter:0});
 let state=newState(), view='loading', history=[], editingClient=null, viewingClient=null, editingInvoice=null, viewingInvoice=null, dirty=false;
 let pendingInvoice=null, cloud=null, ws=null, sessionUid=null, synced=false, offline=false, busy=false, authMode='in', resendTimer=null, migrationPlan=null;
+let senderEditToken, clientEditToken, invoiceEditToken, writeVersion=0;
 const MIN_PASSWORD=8;
 const AUTH_VIEWS=['loading','welcome','verify','reset'];
 const VIEWS=['loading','welcome','verify','reset','home','generate','invoice','details','clients','client','client-edit','settings','migrate'];
@@ -86,14 +87,14 @@ async function perform(button,fn){
  if(busy)return false;
  if(!ws){toast('Please sign in again');return false;}
  if(offline||globalThis.navigator?.onLine===false){toast('You are offline. Nothing was saved.');return false;}
- const w=ws;busy=true;if(button)button.disabled=true;
- try{await fn(w);return true;}
+ const w=ws,version=++writeVersion;busy=true;if(button)button.disabled=true;
+ try{await fn(w);return w===ws&&version===writeVersion;}
  catch(e){
   if(w!==ws)return false; // account changed meanwhile: say nothing about the old account
   toast(e?.message||'Could not save. Nothing was changed.');
   if(e?.code==='conflict')paintView();
   return false;
- }finally{busy=false;if(button)button.disabled=false;}
+ }finally{if(version===writeVersion){busy=false;if(button)button.disabled=false;}}
 }
 
 /* ---------- account / session ---------- */
@@ -102,6 +103,8 @@ function teardown(){
  try{w?.close();}catch(e){}
  state=newState();synced=false;offline=false;history=[];homeFilter='all';sheetInv=null;if($('issueSheet'))$('issueSheet').hidden=true;
  editingClient=viewingClient=editingInvoice=viewingInvoice=null;dirty=false;migrationPlan=null;
+ writeVersion++;busy=false;pendingInvoice=null;senderEditToken=clientEditToken=invoiceEditToken=undefined;
+ for(const buttonId of ['f_save','ce_save','ce_delete','g_go','issueInv','deleteInv'])$(buttonId).disabled=false;
  for(const e of document.querySelectorAll('#v-home input,#v-generate input,#v-generate select,#v-details input,#v-details textarea,#v-client-edit input,#v-client-edit textarea,#v-generate textarea,#v-details select')){try{e.value='';}catch(_){}}
  for(const idn of ['iblist','clientList','clientDetail','paper','mg_report'])if($(idn))$(idn).innerHTML='';
  for(const idn of ['au_pass','au_pass2'])if($(idn))$(idn).value='';
@@ -238,6 +241,7 @@ async function signOutNow(){
 
 /* ---------- details & clients ---------- */
 function showDetails(){
+ senderEditToken=state.senderToken;
  fillFields(fromFields,'f_',state.from);dirty=false;
  const saved=!!(state.from.name&&state.from.addr);$('f_saved').hidden=!saved;$('f_hint').hidden=saved;
  go('details');
@@ -245,7 +249,7 @@ function showDetails(){
 async function saveDetails(){
  const v=Core.validateSender(formValues(fromFields,'f_'));
  if(v.error){toast(v.error);return;}
- const ok=await perform($('f_save'),w=>w.saveSender(v.value,state.senderToken));
+ const ok=await perform($('f_save'),w=>w.saveSender(v.value,senderEditToken));
  if(ok){dirty=false;toast('Details saved');back();}
 }
 function renderClients(){
@@ -267,6 +271,7 @@ function openClient(clientId){
 function openClientEditor(clientId=null){
  editingClient=clientId;
  const c=state.clients.find(x=>x.id===clientId)||{name:'',addr:'',pan:'',gstin:''};
+ clientEditToken=c.updateToken;
  fillFields(clientFields,'ce_',c);
  $('ce_title').textContent=clientId?'Edit Client':'Add Client';
  $('ce_save').textContent=clientId?'Save Changes':'Add Client';
@@ -277,15 +282,14 @@ function openClientEditor(clientId=null){
 async function saveClient(){
  const v=Core.validateClient(formValues(clientFields,'ce_'));
  if(v.error){toast(v.error);return;}
- const token=editingClient?state.clients.find(x=>x.id===editingClient)?.updateToken:undefined;
- const ok=await perform($('ce_save'),w=>w.saveClient(v.value,editingClient,token));
+ const ok=await perform($('ce_save'),w=>w.saveClient(v.value,editingClient,clientEditToken));
  if(ok){dirty=false;history=['home'];show('clients');paintView();toast('Client saved');}
 }
 async function deleteClient(){
  if(!editingClient)return;
  if(!confirm('Remove this client? Existing invoices will remain unchanged.'))return;
  const target=editingClient;
- const ok=await perform($('ce_delete'),w=>w.deleteClient(target));
+ const ok=await perform($('ce_delete'),w=>w.deleteClient(target,clientEditToken));
  if(ok){dirty=false;history=['home'];editingClient=null;show('clients');paintView();toast('Client removed');}
 }
 
@@ -325,7 +329,7 @@ function fillClients(selected){
 function openInvoiceEditor(invoiceId=null){
  const inv=state.invoices.find(x=>x.id===invoiceId);
  if(inv && invoiceStatus(inv)!=='draft'){toast('Issued invoices cannot be edited');return;}
- editingInvoice=invoiceId;
+ editingInvoice=invoiceId;invoiceEditToken=inv?.updateToken;
  fillClients(inv?.clientId);
  $('g_reg').value=inv?.reg||'';
  $('g_amt').value=inv?(inv.amountPaise/100).toFixed(2):'';
@@ -343,9 +347,10 @@ async function submitInvoice(){
  if(v.error){toast(v.error);return;}
  if(v.value.taxRate>0&&!confirm('Confirm you are entitled to charge GST at the selected rate. The app does not determine your GST obligations.'))return;
  const old=state.invoices.find(x=>x.id===editingInvoice);
+ if(editingInvoice&&!old){toast('That draft no longer exists. Your changes have not been saved.');return;}
  if(old && invoiceStatus(old)!=='draft'){toast('Issued invoices cannot be edited. Duplicate to make a correction.');return;}
  let savedId=null;
- const ok=await perform($('g_go'),async w=>{savedId=await w.saveDraft(old?.id||null,v.value,client,state.from,old?.updateToken);});
+ const ok=await perform($('g_go'),async w=>{savedId=await w.saveDraft(old?.id||null,v.value,client,state.from,invoiceEditToken);});
  if(ok){dirty=false;editingInvoice=null;history=['home'];viewingInvoice=savedId;pendingInvoice=savedId;show('invoice');paintView();toast('Draft saved. Issue it when it is ready.');}
 }
 async function updateInvoiceStatus(status){
@@ -390,13 +395,13 @@ async function deleteDraft(){
  if(!inv||invoiceStatus(inv)!=='draft')return;
  if(!confirm('Delete this draft? This cannot be undone.'))return;
  const target=inv.id;
- const ok=await perform($('deleteInv'),w=>w.deleteDraft(target));
+ const ok=await perform($('deleteInv'),w=>w.deleteDraft(target,inv.updateToken));
  if(ok){viewingInvoice=null;history=[];show('home');paintView();toast('Draft deleted');}
 }
 function duplicateInvoice(){
  const inv=state.invoices.find(x=>x.id===viewingInvoice);
  if(!inv)return;
- editingInvoice=null;
+ editingInvoice=null;invoiceEditToken=undefined;
  fillClients(inv.clientId);
  $('g_reg').value=inv.reg||'';
  $('g_amt').value=(inv.amountPaise/100).toFixed(2);
@@ -456,7 +461,7 @@ function openMigrate(){
   box.innerHTML=(s?'<ul class="mg-sum"><li><b>'+s.invoices+'</b> invoices ('+s.skippedInvoices+' already in this account)</li><li><b>'+s.clients+'</b> clients ('+s.skippedClients+' already in this account)</li><li>Highest historical number: <b>'+s.highestHistoricalSequence+'</b>; new invoices would continue from <b>'+s.nextSequenceAfterImport+'</b></li></ul>':'')+
    (migrationPlan.errors.length?'<p class="msg err">Fix these before importing:</p><ul>'+li(migrationPlan.errors.slice(0,20))+'</ul>':'<p class="msg ok">Validation passed.</p>')+
    (migrationPlan.warnings.length?'<p class="subhead">Notes</p><ul>'+li(migrationPlan.warnings.slice(0,20))+'</ul>':'')+
-   '<p class="subhead">Rollback plan</p><p class="note">'+esc(migrationPlan.rollback.note)+' '+migrationPlan.rollback.deletes.length+' documents would be tagged '+esc(migrationPlan.rollback.batchId)+'.</p>';
+   (migrationPlan.rollback?'<p class="subhead">Rollback plan</p><p class="note">'+esc(migrationPlan.rollback.note)+' '+migrationPlan.rollback.deletes.length+' documents would be tagged '+esc(migrationPlan.rollback.batchId)+'.</p>':'');
  }
  $('mg_backup').disabled=!migrationPlan?.backup;
  $('mg_import').disabled=true;

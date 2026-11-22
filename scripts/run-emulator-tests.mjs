@@ -9,11 +9,12 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const projectId = 'demo-invoice-studio-v2';
-const java = process.env.INVOICE_JAVA || '/opt/homebrew/opt/openjdk@21/bin/java';
+const java = process.env.INVOICE_JAVA || (process.env.JAVA_HOME ? join(process.env.JAVA_HOME, 'bin/java') : process.platform === 'darwin' ? '/opt/homebrew/opt/openjdk@21/bin/java' : '/usr/bin/java');
 const cacheDir = join(homedir(), '.cache/firebase/emulators');
 // The Firebase CLI may replace the cached emulator jar with the version it pins, so locate whichever jar is present.
-const jar = process.env.INVOICE_FIRESTORE_JAR || join(cacheDir, (await readdir(cacheDir).catch(() => [])).filter(f => /^cloud-firestore-emulator-v[\d.]+\.jar$/.test(f)).sort().at(-1) || 'MISSING-cloud-firestore-emulator.jar');
-const firebaseLib = process.env.INVOICE_FIREBASE_LIB || '/opt/homebrew/lib/node_modules/firebase-tools/lib/';
+const jar = process.env.INVOICE_FIRESTORE_JAR || join(cacheDir, (await readdir(cacheDir).catch(() => [])).filter(f => /^cloud-firestore-emulator-v[\d.]+\.jar$/.test(f)).sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).at(-1) || 'MISSING-cloud-firestore-emulator.jar');
+const firebaseLib = (process.env.INVOICE_FIREBASE_LIB || '/opt/homebrew/lib/node_modules/firebase-tools/lib/').replace(/\/?$/, '/');
+const testCommand = process.argv.includes('--e2e') ? 'node tests/e2e/browser.e2e.mjs' : 'node --test --test-concurrency=1 tests/rules/*.test.mjs tests/cloud/*.test.mjs';
 if (Number(process.versions.node.split('.')[0]) < 22) throw Error('Run with Node 22 or later.');
 await Promise.all([access(java), access(jar), access(join(firebaseLib, 'commands/emulators-exec.js'))]);
 
@@ -69,7 +70,7 @@ try {
       return original.call(this,o);
     };
     process.env.IS_FIREBASE_CLI='true';
-    require(b+'commands/emulators-exec').command.runner()('node --test --test-concurrency=1 tests/rules/*.test.mjs tests/cloud/*.test.mjs',
+    require(b+'commands/emulators-exec').command.runner()(${JSON.stringify(testCommand)},
       {project:'${projectId}',only:'auth',config:'${join(root, 'firebase.json')}',nonInteractive:true})
       .then(()=>process.exit(0)).catch(e=>{console.error(e.message);process.exit(1);});`;
   authProcess = spawn(process.execPath, ['-e', script], { cwd: root, env: childEnv, stdio: 'inherit' });

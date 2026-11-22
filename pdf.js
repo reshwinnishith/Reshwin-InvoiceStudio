@@ -19,8 +19,12 @@
     }).catch(e => { loading = null; throw e; });
     return loading;
   }
-  // jsPDF's standard fonts only cover Latin-1; map other characters to something readable instead of dropping them.
-  const safe = s => String(s ?? '').replace(/[^\x20-\x7E -ÿ\n]/g, ch => ch === '–' || ch === '—' ? '-' : ch === '’' || ch === '‘' ? "'" : ch === '“' || ch === '”' ? '"' : ch === '…' ? '...' : ch === '₹' ? 'Rs ' : '?');
+  // Standard fonts cannot render every script. Never silently replace a person's name or invoice text with question marks.
+  const safe = s => {
+    const text = String(s ?? '').replace(/[–—]/g, '-').replace(/[’‘]/g, "'").replace(/[“”]/g, '"').replace(/…/g, '...').replace(/₹/g, 'Rs ').replace(/\t/g, ' ');
+    if (/[^\x20-\x7E -ÿ\r\n]/.test(text)) throw new Error('This text needs a Unicode font. Use Print and choose Save as PDF.');
+    return text;
+  };
 
   const W = 794, H = 1123, SIDE = 54;
   const INK = [28, 26, 24], DIM = [111, 104, 95], RULE = [228, 221, 210], BURG = [124, 29, 43], GOLD = [168, 132, 47], WHITE = [255, 255, 255];

@@ -41,6 +41,9 @@ export function createCloud({ auth, db, A, F, core: Core = globalThis.InvoiceCor
   const listeners = new Set();
   let verifiedClaimFor = null;
   let lastVerificationSent = 0;
+  let lastVerificationUid = null;
+  let sessionVersion = 0, disposed = false;
+  let authEpoch = 0, lastAuthUid;
   const emit = s => { session = s; for (const l of [...listeners]) { try { l(s); } catch (e) { console.error(e); } } };
 
   async function resolveUser(user) {
@@ -53,24 +56,27 @@ export function createCloud({ auth, db, A, F, core: Core = globalThis.InvoiceCor
     return { status: 'ready', uid: user.uid, email: user.email };
   }
   const unsubAuth = A.onAuthStateChanged(auth, async user => {
+    const uid = user?.uid || null;
+    if (uid !== lastAuthUid) { authEpoch++; lastAuthUid = uid; }
+    const version = ++sessionVersion;
     const next = await resolveUser(user);
-    if ((auth.currentUser?.uid || null) !== (user?.uid || null)) return; // a newer auth event superseded this one
+    if (disposed || version !== sessionVersion || (auth.currentUser?.uid || null) !== (user?.uid || null)) return;
     emit(next);
   });
 
-  const withTimeout = (p, label) => new Promise((resolve, reject) => {
-    const t = setTimeout(() => reject(new CloudError('timeout', label + ' could not be confirmed. Check the list before trying again.')), timeoutMs);
+  const withTimeout = (p, label, expire) => new Promise((resolve, reject) => {
+    const t = setTimeout(() => { expire(); reject(new CloudError('timeout', label + ' could not be confirmed. Check the list before trying again.')); }, timeoutMs);
     p.then(v => { clearTimeout(t); resolve(v); }, e => { clearTimeout(t); reject(e); });
   });
   function mapError(e) {
     if (e instanceof CloudError) return e;
     const c = e?.code || '';
-    if (c === 'unavailable' || c === 'deadline-exceeded') return new CloudError('offline', 'You appear to be offline. Nothing was saved.', e);
+    if (c === 'unavailable' || c === 'deadline-exceeded') return new CloudError('offline', 'The save could not be confirmed. Check your connection and the list before retrying.', e);
     if (c === 'permission-denied') return new CloudError('permission', 'This change was not allowed. Sign in again or check the details.', e);
     if (c === 'aborted' || c === 'failed-precondition') return new CloudError('conflict', 'This record changed elsewhere. Reload and try again.', e);
     if (c === 'not-found') return new CloudError('not-found', 'That record no longer exists.', e);
     if (c === 'resource-exhausted') return new CloudError('quota', 'Service is busy. Try again shortly.', e);
-    return new CloudError('unknown', 'Could not save. Nothing was changed.', e);
+    return new CloudError('unknown', 'The save could not be confirmed. Check the list before retrying.', e);
   }
 
   // A continue URL that Firebase rejects must not block the email: retry once with Firebase's default action page.
@@ -92,7 +98,7 @@ export function createCloud({ auth, db, A, F, core: Core = globalThis.InvoiceCor
     // same "verify your email" screen with a working Resend button, so nobody has to register twice.
     async signUp(email, password) {
       const cred = await A.createUserWithEmailAndPassword(auth, email, password);
-      try { await sendVerification(cred.user); lastVerificationSent = Date.now(); return { verificationSent: true, errorCode: null }; }
+      try { await sendVerification(cred.user); lastVerificationUid = cred.user.uid; lastVerificationSent = Date.now(); return { verificationSent: true, errorCode: null }; }
       catch (e) { return { verificationSent: false, errorCode: e?.code || 'unknown' }; }
     },
     async signIn(email, password) { await A.signInWithEmailAndPassword(auth, email, password); },
@@ -100,18 +106,22 @@ export function createCloud({ auth, db, A, F, core: Core = globalThis.InvoiceCor
     async resendVerification({ cooldownMs = 60000 } = {}) {
       const user = auth.currentUser;
       if (!user) throw new CloudError('signed-out', 'Please sign in first.');
-      const wait = cooldownMs - (Date.now() - lastVerificationSent);
+      const wait = lastVerificationUid === user.uid ? cooldownMs - (Date.now() - lastVerificationSent) : 0;
       if (wait > 0) throw new CloudError('cooldown', 'Please wait ' + Math.ceil(wait / 1000) + ' seconds before requesting another email.');
       await sendVerification(user);
+      lastVerificationUid = user.uid;
       lastVerificationSent = Date.now();
     },
     // Re-reads the account from the server so a just-clicked verification link is noticed, and refreshes the token.
     async refreshVerification() {
       const user = auth.currentUser;
       if (!user) return session;
+      const version = ++sessionVersion;
       await user.reload();
+      if (disposed || version !== sessionVersion || auth.currentUser?.uid !== user.uid) return session;
       verifiedClaimFor = null;
-      const next = await resolveUser(auth.currentUser);
+      const next = await resolveUser(user);
+      if (disposed || version !== sessionVersion || auth.currentUser?.uid !== user.uid) return session;
       emit(next);
       return next;
     },
@@ -128,8 +138,9 @@ export function createCloud({ auth, db, A, F, core: Core = globalThis.InvoiceCor
     openWorkspace(uid, handlers) {
       if (session.status !== 'ready' || session.uid !== uid || auth.currentUser?.uid !== uid) throw new CloudError('not-ready', 'Not signed in with a verified email.');
       let closed = false;
+      const epoch = authEpoch;
       const unsubs = [];
-      const current = () => !closed && auth.currentUser?.uid === uid && session.status === 'ready' && session.uid === uid;
+      const current = () => !closed && !disposed && epoch === authEpoch && auth.currentUser?.uid === uid && session.status === 'ready' && session.uid === uid;
       const col = name => F.collection(db, 'users', uid, name);
       const ref = (name, docId) => F.doc(db, 'users', uid, name, docId);
       const data = { sender: null, clients: [], invoices: [], counter: 0 };
@@ -141,12 +152,12 @@ export function createCloud({ auth, db, A, F, core: Core = globalThis.InvoiceCor
         handlers.onData?.({ ...data, clients: [...data.clients], invoices: [...data.invoices] }, { ready, offline: Object.values(fromCache).some(Boolean) });
       };
       const fail = e => { if (current()) handlers.onError?.(mapError(e)); };
-      const watch = (key, q, apply) => unsubs.push(F.onSnapshot(q, snap => {
+      const watch = (key, q, apply) => unsubs.push(F.onSnapshot(q, { includeMetadataChanges: true }, snap => {
         if (!current()) return;
         apply(snap); loaded[key] = true; fromCache[key] = !!snap.metadata?.fromCache; push();
       }, fail));
-      watch('sender', ref('settings', 'sender'), s => { data.sender = s.exists() ? Core.senderFromDoc(s.data()) : null; if (data.sender) data.senderToken = s.data().updatedAt?.toMillis?.() ?? null; else data.senderToken = null; });
-      watch('clients', col('clients'), s => { data.clients = s.docs.map(d => ({ ...Core.clientFromDoc(d.id, d.data()), updateToken: d.data().updatedAt?.toMillis?.() ?? null })); });
+      watch('sender', ref('settings', 'sender'), s => { data.sender = s.exists() ? Core.senderFromDoc(s.data()) : null; data.senderToken = data.sender ? Core.timestampToken(s.data().updatedAt) : null; });
+      watch('clients', col('clients'), s => { data.clients = s.docs.map(d => ({ ...Core.clientFromDoc(d.id, d.data()), updateToken: Core.timestampToken(d.data().updatedAt) })); });
       watch('invoices', col('invoices'), s => {
         data.invoices = s.docs.map(d => Core.invoiceFromDoc(d.id, d.data())).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
       });
@@ -156,14 +167,17 @@ export function createCloud({ auth, db, A, F, core: Core = globalThis.InvoiceCor
       const guard = () => { if (!current()) throw new CloudError('account-changed', 'Your session changed. Please try again.'); };
       async function tx(label, fn) {
         guard();
+        let expired = false;
+        const active = () => { guard(); if (expired) throw new CloudError('timeout', 'This save expired. Check the list before retrying.'); };
         try {
-          const result = await withTimeout(F.runTransaction(db, fn), label);
+          const result = await withTimeout(F.runTransaction(db, async t => { active(); const value = await fn(t); active(); return value; }), label, () => { expired = true; });
+          guard();
           return result;
         } catch (e) { throw mapError(e); }
       }
-      const tokenOf = snap => snap.data()?.updatedAt?.toMillis?.() ?? null;
+      const tokenOf = snap => Core.timestampToken(snap.data()?.updatedAt);
       const checkToken = (snap, expected) => {
-        if (expected !== undefined && expected !== null && tokenOf(snap) !== expected) throw new CloudError('conflict', 'This record changed on another device. Reload and try again.');
+        if (expected !== undefined && tokenOf(snap) !== expected) throw new CloudError('conflict', 'This record changed on another device. Reload and try again.');
       };
 
       const ws = {
@@ -200,8 +214,8 @@ export function createCloud({ auth, db, A, F, core: Core = globalThis.InvoiceCor
             return cid;
           });
         },
-        async deleteClient(clientId) {
-          return tx('Client', async t => { t.delete(ref('clients', clientId)); });
+        async deleteClient(clientId, expectedToken) {
+          return tx('Client', async t => { const r = ref('clients', clientId), s = await t.get(r); if (!s.exists()) return; checkToken(s, expectedToken); t.delete(r); });
         },
         // `input` is validated Core.validateInvoiceInput().value; client/sender are the UI-shaped records being frozen into the draft.
         async saveDraft(invoiceId, input, client, sender, expectedToken) {
@@ -223,11 +237,12 @@ export function createCloud({ auth, db, A, F, core: Core = globalThis.InvoiceCor
             return iid;
           });
         },
-        async deleteDraft(invoiceId) {
+        async deleteDraft(invoiceId, expectedToken) {
           return tx('Invoice', async t => {
             const r = ref('invoices', invoiceId), s = await t.get(r);
             if (!s.exists()) return;
             if (s.data().status !== 'draft') throw new CloudError('locked', 'Only drafts can be deleted.');
+            checkToken(s, expectedToken);
             t.delete(r);
           });
         },
@@ -273,7 +288,7 @@ export function createCloud({ auth, db, A, F, core: Core = globalThis.InvoiceCor
       };
       return ws;
     },
-    dispose() { unsubAuth(); listeners.clear(); }
+    dispose() { disposed = true; sessionVersion++; unsubAuth(); listeners.clear(); }
   };
   return api;
 }
