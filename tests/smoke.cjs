@@ -50,7 +50,7 @@ function makeFake(){
   setSession(s){session=s;[...subs].forEach(cb=>cb(s));},
   onSession(cb){subs.add(cb);cb(session);return()=>subs.delete(cb);},
   async signUp(email,pw){log.push('signUp');if(f.sendFails){accounts[email]={uid:'u-'+email,data:{sender:null,clients:[],invoices:[],counter:0},verified:false,pw};f.setSession({status:'unverified',uid:accounts[email].uid,email});return{verificationSent:false,errorCode:f.sendFails};}if(accounts[email])throw Object.assign(Error('x'),{code:'auth/email-already-in-use'});accounts[email]={uid:'u-'+email,data:{sender:null,clients:[],invoices:[],counter:0},verified:false,pw};f.setSession({status:'unverified',uid:accounts[email].uid,email});return{verificationSent:true};},
-  async signIn(email,pw){log.push('signIn');const a=accounts[email];if(!a||pw==='bad'||(a.pw&&a.pw!==pw))throw Object.assign(Error('x'),{code:'auth/invalid-credential'});f.setSession(a.verified?{status:'ready',uid:a.uid,email}:{status:'unverified',uid:a.uid,email});},
+  async signIn(email,pw){log.push('signIn');const a=accounts[email];if(!a||pw==='bad'||(a.pw&&a.pw!==pw))throw Object.assign(Error('x'),{code:'auth/invalid-credential'});f.setSession(a.verified?{status:'ready',uid:a.uid,email}:{status:'unverified',uid:a.uid,email});if(f.authGate)await f.authGate;},
   async signOut(){log.push('signOut');f.setSession({status:'signedOut'});},
   async resendVerification(){log.push('resend');if(f.cooldown)throw new CloudError('cooldown','Please wait 30 seconds before requesting another email.');},
   async refreshVerification(){log.push('refresh');const email=session.email;if(accounts[email]?.verified){f.setSession({status:'ready',uid:session.uid,email});}return session;},
@@ -274,6 +274,16 @@ function makeFake(){
  await click('signOut');get('toast').textContent='';releaseOld();fake.gate=null;await oldSave;await settle();
  assert.deepEqual(visible(),['welcome']);assert.notEqual(toasts(),'Client saved');
  get('au_email').value='b@example.test';get('au_pass').value='Fictional-Pass-9999';await submit('au_form');
+
+ /* A late sign-in completion must not unlock an independent workspace write. */
+ await click('signOut');let finishLogin,finishWrite;
+ fake.authGate=new Promise(r=>{finishLogin=r;});get('au_email').value='b@example.test';get('au_pass').value='Fictional-Pass-9999';
+ const pendingLogin=get('au_form').handlers.submit({preventDefault(){}});await settle();
+ await click('addClient');get('ce_name').value='Pending Save';get('ce_addr').value='Fictional';
+ fake.gate=new Promise(r=>{finishWrite=r;});const pendingSave=get('ce_save').onclick();await settle();
+ const attempts=fake.log.filter(x=>x==='saveClient').length;finishLogin();fake.authGate=null;await pendingLogin;
+ const secondSave=get('ce_save').onclick();await settle();assert.equal(fake.log.filter(x=>x==='saveClient').length,attempts,'late auth completion cannot permit a second write');
+ finishWrite();fake.gate=null;await pendingSave;await secondSave;await settle();
 
  /* migration preview performs no writes and leaves the browser copy untouched */
  await click('setBtn');assert.equal(get('openMigrate').hidden,false);

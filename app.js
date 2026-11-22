@@ -11,6 +11,7 @@ const newState = () => ({from:blankFrom(),senderToken:null,clients:[],invoices:[
 let state=newState(), view='loading', history=[], editingClient=null, viewingClient=null, editingInvoice=null, viewingInvoice=null, dirty=false;
 let pendingInvoice=null, cloud=null, ws=null, sessionUid=null, synced=false, offline=false, busy=false, authMode='in', resendTimer=null, migrationPlan=null;
 let senderEditToken, clientEditToken, invoiceEditToken, writeVersion=0;
+let authBusy=false;
 const MIN_PASSWORD=8;
 const AUTH_VIEWS=['loading','welcome','verify','reset'];
 const VIEWS=['loading','welcome','verify','reset','home','generate','invoice','details','clients','client','client-edit','settings','migrate'];
@@ -183,7 +184,7 @@ function setAuthMode(mode){
 const EMAIL_OK=e=>Core.RE.email.test(e);
 async function submitAuth(ev){
  ev?.preventDefault?.();
- if(busy)return;
+ if(authBusy)return;
  const email=$('au_email').value.trim(),pass=$('au_pass').value;
  if(!EMAIL_OK(email)){setMsg($('au_msg'),'Enter a valid email address.','err');return;}
  if(!pass){setMsg($('au_msg'),'Enter your password.','err');return;}
@@ -191,7 +192,7 @@ async function submitAuth(ev){
   if(pass.length<MIN_PASSWORD){setMsg($('au_msg'),'Choose a password of at least '+MIN_PASSWORD+' characters.','err');return;}
   if(pass!==$('au_pass2').value){setMsg($('au_msg'),'The two passwords do not match.','err');return;}
  }
- busy=true;$('au_submit').disabled=true;setMsg($('au_msg'),authMode==='up'?'Creating your account…':'Signing in…','');
+ authBusy=true;$('au_submit').disabled=true;setMsg($('au_msg'),authMode==='up'?'Creating your account…':'Signing in…','');
  try{
   if(authMode==='up'){
    try{
@@ -207,7 +208,7 @@ async function submitAuth(ev){
   else await cloud.signIn(email,pass);
   $('au_pass').value='';$('au_pass2').value='';
  }catch(e){setMsg($('au_msg'),cloud.describeAuthError(e),'err');}
- finally{busy=false;$('au_submit').disabled=false;}
+ finally{authBusy=false;$('au_submit').disabled=false;}
 }
 async function submitReset(ev){
  ev?.preventDefault?.();
