@@ -24,7 +24,18 @@ const failedRequests = [];
 page.on('response', r => { if (r.status() >= 400) failedRequests.push(r.status() + ' ' + new URL(r.url()).pathname); });
 page.on('dialog', d => d.accept());
 // page.waitForFunction evaluates strings and is blocked by our strict CSP; poll with evaluate() (CDP) instead.
-async function waitFor(fn, arg, { timeout = 15000 } = {}) { const end = Date.now() + timeout; while (Date.now() < end) { if (await page.evaluate(fn, arg)) return; await page.waitForTimeout(100); } throw new Error('timeout waiting for ' + fn.toString().slice(0, 90)); }
+async function waitFor(fn, arg, { timeout = 15000 } = {}) {
+  const end = Date.now() + timeout;
+  while (Date.now() < end) {
+    try { if (await page.evaluate(fn, arg)) return; }
+    catch (e) {
+      // Logout intentionally reloads every tab to discard its memory cache. Retry only that transient navigation boundary.
+      if (!/Execution context was destroyed|Cannot find context with specified id/.test(e.message)) throw e;
+    }
+    await page.waitForTimeout(100);
+  }
+  throw new Error('timeout waiting for ' + fn.toString().slice(0, 90));
+}
 await page.addInitScript(() => { window.__shared = []; window.__shareMode = 'ok';
   navigator.canShare = d => !!(d && d.files && d.files.length);
   navigator.share = async d => { if (window.__shareMode === 'cancel') throw new DOMException('cancelled', 'AbortError'); window.__shared.push({ name: d.files[0].name, type: d.files[0].type, size: d.files[0].size }); }; });
