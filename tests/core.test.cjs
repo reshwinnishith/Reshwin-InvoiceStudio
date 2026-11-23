@@ -60,4 +60,8 @@ plan = C.planMigration({ from, clients: [client], invoices: [mk(1)] }, { existin
 assert.equal(plan.summary.skippedClients, 1); assert.equal(plan.summary.skippedInvoices, 1); assert.equal(plan.summary.nextSequenceAfterImport, 10);
 plan = C.planMigration({ from, clients: [client], invoices: [mk(1)] }, { existing: { clients: [], invoices: [{ id: 'zzz', no: 'RESH-2026-001' }], lastSequence: 1 } });
 assert.ok(!plan.ok, 'number collision with live data blocks import');
+// A high historical number must not allocate or scan a billion gaps.
+const started=Date.now();const sparse=C.planMigration({from,clients:[client],invoices:[mk(999999999)]});
+assert.ok(sparse.ok);assert.ok(Date.now()-started<1000);assert.ok(sparse.warnings.some(w=>w.includes('1, 2, 3')));
+assert.notEqual(C.timestampToken({seconds:100,nanoseconds:1000}),C.timestampToken({seconds:100,nanoseconds:2000}));
 console.log('PASS: core business rules and migration planner');

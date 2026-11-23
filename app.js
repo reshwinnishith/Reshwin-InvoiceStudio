@@ -10,6 +10,8 @@ const blankFrom = () => Core.blankFrom();
 const newState = () => ({from:blankFrom(),senderToken:null,clients:[],invoices:[],counter:0});
 let state=newState(), view='loading', history=[], editingClient=null, viewingClient=null, editingInvoice=null, viewingInvoice=null, dirty=false;
 let pendingInvoice=null, cloud=null, ws=null, sessionUid=null, synced=false, offline=false, busy=false, authMode='in', resendTimer=null, migrationPlan=null;
+let senderEditToken, clientEditToken, invoiceEditToken, writeVersion=0;
+let authBusy=false;
 const MIN_PASSWORD=8;
 const AUTH_VIEWS=['loading','welcome','verify','reset'];
 const VIEWS=['loading','welcome','verify','reset','home','generate','invoice','details','clients','client','client-edit','settings','migrate'];
@@ -86,14 +88,14 @@ async function perform(button,fn){
  if(busy)return false;
  if(!ws){toast('Please sign in again');return false;}
  if(offline||globalThis.navigator?.onLine===false){toast('You are offline. Nothing was saved.');return false;}
- const w=ws;busy=true;if(button)button.disabled=true;
- try{await fn(w);return true;}
+ const w=ws,version=++writeVersion;busy=true;if(button)button.disabled=true;
+ try{await fn(w);return w===ws&&version===writeVersion;}
  catch(e){
   if(w!==ws)return false; // account changed meanwhile: say nothing about the old account
   toast(e?.message||'Could not save. Nothing was changed.');
   if(e?.code==='conflict')paintView();
   return false;
- }finally{busy=false;if(button)button.disabled=false;}
+ }finally{if(version===writeVersion){busy=false;if(button)button.disabled=false;}}
 }
 
 /* ---------- account / session ---------- */
@@ -102,6 +104,8 @@ function teardown(){
  try{w?.close();}catch(e){}
  state=newState();synced=false;offline=false;history=[];homeFilter='all';sheetInv=null;if($('issueSheet'))$('issueSheet').hidden=true;
  editingClient=viewingClient=editingInvoice=viewingInvoice=null;dirty=false;migrationPlan=null;
+ writeVersion++;busy=false;pendingInvoice=null;senderEditToken=clientEditToken=invoiceEditToken=undefined;
+ for(const buttonId of ['f_save','ce_save','ce_delete','g_go','issueInv','deleteInv'])$(buttonId).disabled=false;
  for(const e of document.querySelectorAll('#v-home input,#v-generate input,#v-generate select,#v-details input,#v-details textarea,#v-client-edit input,#v-client-edit textarea,#v-generate textarea,#v-details select')){try{e.value='';}catch(_){}}
  for(const idn of ['iblist','clientList','clientDetail','paper','mg_report'])if($(idn))$(idn).innerHTML='';
  for(const idn of ['au_pass','au_pass2'])if($(idn))$(idn).value='';
@@ -180,7 +184,7 @@ function setAuthMode(mode){
 const EMAIL_OK=e=>Core.RE.email.test(e);
 async function submitAuth(ev){
  ev?.preventDefault?.();
- if(busy)return;
+ if(authBusy)return;
  const email=$('au_email').value.trim(),pass=$('au_pass').value;
  if(!EMAIL_OK(email)){setMsg($('au_msg'),'Enter a valid email address.','err');return;}
  if(!pass){setMsg($('au_msg'),'Enter your password.','err');return;}
@@ -188,7 +192,7 @@ async function submitAuth(ev){
   if(pass.length<MIN_PASSWORD){setMsg($('au_msg'),'Choose a password of at least '+MIN_PASSWORD+' characters.','err');return;}
   if(pass!==$('au_pass2').value){setMsg($('au_msg'),'The two passwords do not match.','err');return;}
  }
- busy=true;$('au_submit').disabled=true;setMsg($('au_msg'),authMode==='up'?'Creating your account…':'Signing in…','');
+ authBusy=true;$('au_submit').disabled=true;setMsg($('au_msg'),authMode==='up'?'Creating your account…':'Signing in…','');
  try{
   if(authMode==='up'){
    try{
@@ -204,7 +208,7 @@ async function submitAuth(ev){
   else await cloud.signIn(email,pass);
   $('au_pass').value='';$('au_pass2').value='';
  }catch(e){setMsg($('au_msg'),cloud.describeAuthError(e),'err');}
- finally{busy=false;$('au_submit').disabled=false;}
+ finally{authBusy=false;$('au_submit').disabled=false;}
 }
 async function submitReset(ev){
  ev?.preventDefault?.();
@@ -238,15 +242,18 @@ async function signOutNow(){
 
 /* ---------- details & clients ---------- */
 function showDetails(){
+ senderEditToken=state.senderToken;
  fillFields(fromFields,'f_',state.from);dirty=false;
  const saved=!!(state.from.name&&state.from.addr);$('f_saved').hidden=!saved;$('f_hint').hidden=saved;
  go('details');
 }
+// A save can finish after the person has already left its screen. Navigate only if they are still where the save started.
+const stillOn=(v)=>view===v;
 async function saveDetails(){
  const v=Core.validateSender(formValues(fromFields,'f_'));
  if(v.error){toast(v.error);return;}
- const ok=await perform($('f_save'),w=>w.saveSender(v.value,state.senderToken));
- if(ok){dirty=false;toast('Details saved');back();}
+ const ok=await perform($('f_save'),w=>w.saveSender(v.value,senderEditToken));
+ if(ok){toast('Details saved');if(stillOn('details')){dirty=false;back();}}
 }
 function renderClients(){
  const box=$('clientList');box.innerHTML='';
@@ -267,6 +274,7 @@ function openClient(clientId){
 function openClientEditor(clientId=null){
  editingClient=clientId;
  const c=state.clients.find(x=>x.id===clientId)||{name:'',addr:'',pan:'',gstin:''};
+ clientEditToken=c.updateToken;
  fillFields(clientFields,'ce_',c);
  $('ce_title').textContent=clientId?'Edit Client':'Add Client';
  $('ce_save').textContent=clientId?'Save Changes':'Add Client';
@@ -277,16 +285,15 @@ function openClientEditor(clientId=null){
 async function saveClient(){
  const v=Core.validateClient(formValues(clientFields,'ce_'));
  if(v.error){toast(v.error);return;}
- const token=editingClient?state.clients.find(x=>x.id===editingClient)?.updateToken:undefined;
- const ok=await perform($('ce_save'),w=>w.saveClient(v.value,editingClient,token));
- if(ok){dirty=false;history=['home'];show('clients');paintView();toast('Client saved');}
+ const ok=await perform($('ce_save'),w=>w.saveClient(v.value,editingClient,clientEditToken));
+ if(ok){toast('Client saved');if(stillOn('client-edit')){dirty=false;history=['home'];show('clients');}paintView();}
 }
 async function deleteClient(){
  if(!editingClient)return;
  if(!confirm('Remove this client? Existing invoices will remain unchanged.'))return;
  const target=editingClient;
- const ok=await perform($('ce_delete'),w=>w.deleteClient(target));
- if(ok){dirty=false;history=['home'];editingClient=null;show('clients');paintView();toast('Client removed');}
+ const ok=await perform($('ce_delete'),w=>w.deleteClient(target,clientEditToken));
+ if(ok){toast('Client removed');if(stillOn('client-edit')){dirty=false;history=['home'];editingClient=null;show('clients');}paintView();}
 }
 
 /* ---------- invoices ---------- */
@@ -319,13 +326,15 @@ function fillClients(selected){
   const o=document.createElement('option');o.textContent='Add a client first';o.value='';s.appendChild(o);
   $('g_go').disabled=true;return;
  }
+ // A draft whose client has since been removed must never be silently re-pointed at another client: make the person choose.
+ if(selected&&!state.clients.some(c=>c.id===selected)){const o=document.createElement('option');o.value='';o.textContent='Choose a client (the original was removed)';s.appendChild(o);}
  for(const c of state.clients){const o=document.createElement('option');o.value=c.id;o.textContent=c.name;s.appendChild(o);}
- $('g_go').disabled=false;if(selected&&state.clients.some(c=>c.id===selected))s.value=selected;
+ $('g_go').disabled=false;if(selected)s.value=state.clients.some(c=>c.id===selected)?selected:'';
 }
 function openInvoiceEditor(invoiceId=null){
  const inv=state.invoices.find(x=>x.id===invoiceId);
  if(inv && invoiceStatus(inv)!=='draft'){toast('Issued invoices cannot be edited');return;}
- editingInvoice=invoiceId;
+ editingInvoice=invoiceId;invoiceEditToken=inv?.updateToken;
  fillClients(inv?.clientId);
  $('g_reg').value=inv?.reg||'';
  $('g_amt').value=inv?(inv.amountPaise/100).toFixed(2):'';
@@ -343,17 +352,30 @@ async function submitInvoice(){
  if(v.error){toast(v.error);return;}
  if(v.value.taxRate>0&&!confirm('Confirm you are entitled to charge GST at the selected rate. The app does not determine your GST obligations.'))return;
  const old=state.invoices.find(x=>x.id===editingInvoice);
+ if(editingInvoice&&!old){toast('That draft no longer exists. Your changes have not been saved.');return;}
  if(old && invoiceStatus(old)!=='draft'){toast('Issued invoices cannot be edited. Duplicate to make a correction.');return;}
  let savedId=null;
- const ok=await perform($('g_go'),async w=>{savedId=await w.saveDraft(old?.id||null,v.value,client,state.from,old?.updateToken);});
- if(ok){dirty=false;editingInvoice=null;history=['home'];viewingInvoice=savedId;pendingInvoice=savedId;show('invoice');paintView();toast('Draft saved. Issue it when it is ready.');}
+ const ok=await perform($('g_go'),async w=>{savedId=await w.saveDraft(old?.id||null,v.value,client,state.from,invoiceEditToken);});
+ if(!ok)return;
+ if(!stillOn('generate')){toast('Draft saved.');paintView();return;}
+ dirty=false;editingInvoice=null;history=['home'];viewingInvoice=savedId;pendingInvoice=savedId;show('invoice');paintView();toast('Draft saved. Issue it when it is ready.');
+}
+function staleSnapshots(inv){
+ const out=[],same=(a,b,keys)=>keys.every(k=>String(a?.[k]??'')===String(b?.[k]??''));
+ if(!same(inv.from,state.from,fromFields))out.push('Your Details');
+ const c=state.clients.find(x=>x.id===inv.clientId);
+ if(c&&!same(inv.client,c,clientFields))out.push('the client\'s details');
+ return out;
 }
 async function updateInvoiceStatus(status){
  const inv=state.invoices.find(x=>x.id===viewingInvoice);
  if(!inv)return;
  const old=invoiceStatus(inv);
  if(!Core.canTransition(old,status)){toast('This status change is not allowed');return;}
- const message=status==='issued'?'Issue this invoice? It will get its invoice number, and after issuing its details cannot be edited.':status==='paid'?'Mark this invoice as paid?':'Void this invoice? Its original record will remain for your records.';
+ // A draft keeps the sender/client details from when it was last saved. Say so before they are frozen by issuing.
+ const stale=status==='issued'?staleSnapshots(inv):[];
+ const note=stale.length?'\n\nNote: '+stale.join(' and ')+' changed since this draft was saved. This invoice will show the details saved in the draft. To use the current details, cancel, then Edit and save the draft first.':'';
+ const message=status==='issued'?'Issue this invoice? It will get its invoice number, and after issuing its details cannot be edited.'+note:status==='paid'?'Mark this invoice as paid?':'Void this invoice? Its original record will remain for your records.';
  if(!confirm(message))return;
  let result=null;
  const ok=await perform(status==='issued'?$('issueInv'):null,async w=>{result=status==='issued'?await w.issue(inv.id,inv.updateToken):await w.setStatus(inv.id,status,inv.updateToken);});
@@ -390,13 +412,13 @@ async function deleteDraft(){
  if(!inv||invoiceStatus(inv)!=='draft')return;
  if(!confirm('Delete this draft? This cannot be undone.'))return;
  const target=inv.id;
- const ok=await perform($('deleteInv'),w=>w.deleteDraft(target));
- if(ok){viewingInvoice=null;history=[];show('home');paintView();toast('Draft deleted');}
+ const ok=await perform($('deleteInv'),w=>w.deleteDraft(target,inv.updateToken));
+ if(ok){toast('Draft deleted');if(stillOn('invoice')&&viewingInvoice===target){viewingInvoice=null;history=[];show('home');}paintView();}
 }
 function duplicateInvoice(){
  const inv=state.invoices.find(x=>x.id===viewingInvoice);
  if(!inv)return;
- editingInvoice=null;
+ editingInvoice=null;invoiceEditToken=undefined;
  fillClients(inv.clientId);
  $('g_reg').value=inv.reg||'';
  $('g_amt').value=(inv.amountPaise/100).toFixed(2);
@@ -456,7 +478,7 @@ function openMigrate(){
   box.innerHTML=(s?'<ul class="mg-sum"><li><b>'+s.invoices+'</b> invoices ('+s.skippedInvoices+' already in this account)</li><li><b>'+s.clients+'</b> clients ('+s.skippedClients+' already in this account)</li><li>Highest historical number: <b>'+s.highestHistoricalSequence+'</b>; new invoices would continue from <b>'+s.nextSequenceAfterImport+'</b></li></ul>':'')+
    (migrationPlan.errors.length?'<p class="msg err">Fix these before importing:</p><ul>'+li(migrationPlan.errors.slice(0,20))+'</ul>':'<p class="msg ok">Validation passed.</p>')+
    (migrationPlan.warnings.length?'<p class="subhead">Notes</p><ul>'+li(migrationPlan.warnings.slice(0,20))+'</ul>':'')+
-   '<p class="subhead">Rollback plan</p><p class="note">'+esc(migrationPlan.rollback.note)+' '+migrationPlan.rollback.deletes.length+' documents would be tagged '+esc(migrationPlan.rollback.batchId)+'.</p>';
+   (migrationPlan.rollback?'<p class="subhead">Rollback plan</p><p class="note">'+esc(migrationPlan.rollback.note)+' '+migrationPlan.rollback.deletes.length+' documents would be tagged '+esc(migrationPlan.rollback.batchId)+'.</p>':'');
  }
  $('mg_backup').disabled=!migrationPlan?.backup;
  $('mg_import').disabled=true;

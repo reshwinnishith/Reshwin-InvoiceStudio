@@ -12,7 +12,9 @@ const mime = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/jav
 const server = http.createServer((q, r) => {
   const u = new URL(q.url, 'http://x'); let f = path.join(root, u.pathname === '/' ? 'index.html' : u.pathname);
   if (!f.startsWith(root) || f.includes('firebase-preparation') || f.includes('node_modules') || !fs.existsSync(f)) { r.writeHead(404); return r.end(); }
-  r.writeHead(200, { ...headers, 'content-type': mime[path.extname(f)] || 'application/octet-stream' }); fs.createReadStream(f).pipe(r);
+  const send = () => { r.writeHead(200, { ...headers, 'content-type': mime[path.extname(f)] || 'application/octet-stream' }); fs.createReadStream(f).pipe(r); };
+  // E2E_SLOW_HTML=<ms> delays page loads (e.g. the deliberate logout reload) to surface timing races locally, as on slow CI runners.
+  if (f.endsWith('.html') && process.env.E2E_SLOW_HTML) setTimeout(send, Number(process.env.E2E_SLOW_HTML)); else send();
 }).listen(5173, '127.0.0.1');
 const results = []; const ok = (n, c, extra = '') => { results.push([c ? 'PASS' : 'FAIL', n + (extra ? ' — ' + extra : '')]); if (!c) process.exitCode = 1; };
 const browser = await chromium.launch({ executablePath: chrome, headless: true });
@@ -24,7 +26,22 @@ const failedRequests = [];
 page.on('response', r => { if (r.status() >= 400) failedRequests.push(r.status() + ' ' + new URL(r.url()).pathname); });
 page.on('dialog', d => d.accept());
 // page.waitForFunction evaluates strings and is blocked by our strict CSP; poll with evaluate() (CDP) instead.
-async function waitFor(fn, arg, { timeout = 15000 } = {}) { const end = Date.now() + timeout; while (Date.now() < end) { if (await page.evaluate(fn, arg)) return; await page.waitForTimeout(100); } throw new Error('timeout waiting for ' + fn.toString().slice(0, 90)); }
+async function waitFor(fn, arg, { timeout = 15000 } = {}) {
+  const end = Date.now() + timeout;
+  while (Date.now() < end) {
+    try { if (await page.evaluate(fn, arg)) return; }
+    catch (e) {
+      // Logout intentionally reloads every tab to discard its memory cache. Retry only that transient navigation boundary.
+      if (!/Execution context was destroyed|Cannot find context with specified id/.test(e.message)) throw e;
+    }
+    await page.waitForTimeout(100);
+  }
+  throw new Error('timeout waiting for ' + fn.toString().slice(0, 90));
+}
+// Logout deliberately reloads every tab. "Welcome is visible" can be true on the OLD document for an instant after
+// location.reload() is called, so tag the document first and wait for a NEW document showing the welcome screen.
+const tagDocument = () => page.evaluate(() => { window.__preLogout = true; });
+const reloadedToWelcome = () => waitFor(() => window.__preLogout === undefined && !document.getElementById('v-welcome').hidden, null, { timeout: 20000 }).then(() => true, () => false);
 await page.addInitScript(() => { window.__shared = []; window.__shareMode = 'ok';
   navigator.canShare = d => !!(d && d.files && d.files.length);
   navigator.share = async d => { if (window.__shareMode === 'cancel') throw new DOMException('cancelled', 'AbortError'); window.__shared.push({ name: d.files[0].name, type: d.files[0].type, size: d.files[0].size }); }; });
@@ -111,11 +128,10 @@ try {
   ok('details: empty-field placeholders are generic hints, never sample bank data', /^e\.g\./.test(det.branchPh) && !/HDFC|Shenoy/.test(await page.content()));
   await shot('17-details-saved'); await page.click('#backBtn');
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.evaluate(() => { window.__marker = 'private-page-state'; });
-  // settings, sign out
+  // settings, sign out (tag the document AFTER navigating, so only the logout reload can clear the tag)
   await page.goto('http://127.0.0.1:5173/?emulator=1'); await page.waitForSelector('#v-home:not([hidden])'); await page.click('#setBtn'); await shot('10-settings');
-  await page.click('#signOut'); await page.waitForSelector('#v-welcome:not([hidden])'); await page.waitForTimeout(1500); ok('sign out returns to welcome', true);
-  ok('logout reloads the page: in-memory SDK cache and page state are discarded', await page.evaluate(() => window.__marker === undefined));
+  await tagDocument(); await page.click('#signOut');
+  ok('logout reloads the page: in-memory SDK cache and page state are discarded, then welcome is shown', await reloadedToWelcome());
   ok('private DOM cleared after logout', await page.evaluate(() => document.getElementById('iblist').innerHTML === '' && document.getElementById('paper').innerHTML === '' && document.getElementById('f_name').value === ''));
   // account B
   const email2 = `fictional-e2e-b-${Date.now()}@example.test`;
@@ -123,18 +139,18 @@ try {
   await page.waitForSelector('#v-verify:not([hidden])'); await verifyEmail(email2); await page.click('#vf_check'); await page.waitForSelector('#v-home:not([hidden])');
   ok('second account sees an empty workspace', (await page.textContent('#ibcount')).startsWith('0') && !(await page.content()).includes('Fictional Client Ltd'));
   // ---- multi-tab: signing out in another tab ends this tab's session too ----
-  const tab2 = await ctx.newPage(); tab2.on('dialog', d => d.accept());
+  await tagDocument(); const tab2 = await ctx.newPage(); tab2.on('dialog', d => d.accept());
   await tab2.goto('http://127.0.0.1:5173/?emulator=1'); await tab2.waitForSelector('#v-home:not([hidden])', { timeout: 20000 });
   await tab2.click('#setBtn'); await tab2.click('#signOut'); await tab2.waitForSelector('#v-welcome:not([hidden])', { timeout: 20000 });
-  await waitFor(() => !document.getElementById('v-welcome').hidden, null, { timeout: 20000 });
-  ok('signing out in another tab signs this tab out and clears its private screen', await page.evaluate(() => document.getElementById('iblist').innerHTML === ''));
+  const crossTabReloaded = await reloadedToWelcome();
+  ok('signing out in another tab reloads this tab and clears its private screen', crossTabReloaded && await page.evaluate(() => document.getElementById('iblist').innerHTML === ''));
   await tab2.close();
   // ---- reduced motion ----
   await page.emulateMedia({ reducedMotion: 'reduce' });
   ok('reduced motion: transitions are effectively disabled', await page.evaluate(() => parseFloat(getComputedStyle(document.getElementById('toast')).transitionDuration) < 0.01));
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await page.fill('#au_email', email2); await page.fill('#au_pass', pass); await page.click('#au_submit'); await page.waitForSelector('#v-home:not([hidden])', { timeout: 20000 });
-  await page.click('#setBtn'); await page.click('#signOut'); await page.waitForSelector('#v-welcome:not([hidden])');
+  await page.click('#setBtn'); await tagDocument(); await page.click('#signOut'); ok('second sign-out also reloads to the welcome screen', await reloadedToWelcome());
   // wrong password and wide/mobile layout
   await page.fill('#au_email', email); await page.fill('#au_pass', 'wrong-password-123'); await page.click('#au_submit'); await waitFor(() => /incorrect/i.test(document.getElementById('au_msg').textContent)); ok('wrong password shows friendly error', true); await shot('11-wrong-password');
   ok('no horizontal scroll on mobile width', await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));

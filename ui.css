@@ -24,7 +24,7 @@ textarea { min-height:105px; }
 .details-list { display:grid;grid-template-columns:1fr;gap:0;margin:18px 0 0; }
 .details-list dt { color:var(--muted);font-size:12px;margin-top:20px;font-weight:600; }
 .details-list dd { margin:5px 0 0;font-size:16px;overflow-wrap:anywhere; }
-.destructive { margin-top:24px;padding:10px 0;color:#b3273a;font-size:14px;font-weight:600; }
+.destructive { margin-top:24px;padding:10px 0;min-height:44px;color:#b3273a;font-size:14px;font-weight:600; }
 .field-help { margin:0;color:var(--muted);font-size:12px;line-height:1.45; }
 #v-clients .empty { padding:35px 16px; }
 #v-client .panel { padding:24px; }
@@ -59,7 +59,7 @@ textarea { min-height:105px; }
 .seg{display:grid;grid-template-columns:1fr 1fr;gap:4px;padding:4px;margin:0 0 18px;border:1px solid var(--line);border-radius:12px;background:var(--soft)}
 .seg button{min-height:40px;border-radius:9px;font-size:14px;font-weight:600;color:var(--muted)}
 .seg button[aria-selected="true"]{background:var(--surface);color:var(--fg);box-shadow:0 1px 3px rgba(28,26,24,.12)}
-.seg button:focus-visible,.linkbtn:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
+.seg button:focus-visible,.linkbtn:focus-visible,.destructive:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
 .msg{margin:14px 0 0;padding:11px 13px;border-radius:10px;font-size:13.5px;line-height:1.45;background:var(--soft);border:1px solid var(--line);color:var(--fg)}
 .msg.err{border-color:#d9a3ab;background:color-mix(in srgb,#b3273a 9%,var(--surface));color:var(--fg)}
 .msg.ok{border-color:#a8c9a6;background:color-mix(in srgb,#2f7d3b 9%,var(--surface))}

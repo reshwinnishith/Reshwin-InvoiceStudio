@@ -50,7 +50,7 @@ function makeFake(){
   setSession(s){session=s;[...subs].forEach(cb=>cb(s));},
   onSession(cb){subs.add(cb);cb(session);return()=>subs.delete(cb);},
   async signUp(email,pw){log.push('signUp');if(f.sendFails){accounts[email]={uid:'u-'+email,data:{sender:null,clients:[],invoices:[],counter:0},verified:false,pw};f.setSession({status:'unverified',uid:accounts[email].uid,email});return{verificationSent:false,errorCode:f.sendFails};}if(accounts[email])throw Object.assign(Error('x'),{code:'auth/email-already-in-use'});accounts[email]={uid:'u-'+email,data:{sender:null,clients:[],invoices:[],counter:0},verified:false,pw};f.setSession({status:'unverified',uid:accounts[email].uid,email});return{verificationSent:true};},
-  async signIn(email,pw){log.push('signIn');const a=accounts[email];if(!a||pw==='bad'||(a.pw&&a.pw!==pw))throw Object.assign(Error('x'),{code:'auth/invalid-credential'});f.setSession(a.verified?{status:'ready',uid:a.uid,email}:{status:'unverified',uid:a.uid,email});},
+  async signIn(email,pw){log.push('signIn');const a=accounts[email];if(!a||pw==='bad'||(a.pw&&a.pw!==pw))throw Object.assign(Error('x'),{code:'auth/invalid-credential'});f.setSession(a.verified?{status:'ready',uid:a.uid,email}:{status:'unverified',uid:a.uid,email});if(f.authGate)await f.authGate;},
   async signOut(){log.push('signOut');f.setSession({status:'signedOut'});},
   async resendVerification(){log.push('resend');if(f.cooldown)throw new CloudError('cooldown','Please wait 30 seconds before requesting another email.');},
   async refreshVerification(){log.push('refresh');const email=session.email;if(accounts[email]?.verified){f.setSession({status:'ready',uid:session.uid,email});}return session;},
@@ -152,6 +152,22 @@ function makeFake(){
  await click('g_go'); assert.equal(run('state.invoices.length'),1); assert.equal(run('state.invoices[0].status'),'draft'); assert.equal(run('state.invoices[0].no'),'');
  assert.equal(visible()[0],'invoice'); assert.match(get('paper').innerHTML,/Assigned when issued/); assert.ok(!get('paper').innerHTML.includes('<img src'),'invoice paper escapes content');
  assert.equal(get('issueInv').hidden,false);assert.equal(get('deleteInv').hidden,false);
+ // Keep the version displayed when each editor opened, while snapshots advance underneath it.
+ const editWs=fake.workspaces.at(-1);
+ for(const [open,save,stateChange,method] of [
+  [()=>run('showDetails()'),'f_save',()=>run('state.senderToken=999'),'saveSender'],
+  [()=>run('openClientEditor(state.clients[0].id)'),'ce_save',()=>run('state.clients[0].updateToken=999'),'saveClient'],
+  [()=>run('openInvoiceEditor(state.invoices[0].id)'),'g_go',()=>run('state.invoices[0].updateToken=999'),'saveDraft']
+ ]){
+  open();run('dirty=true');const beforeToken=method==='saveSender'?run('state.senderToken'):method==='saveClient'?run('state.clients[0].updateToken'):run('state.invoices[0].updateToken');
+  stateChange();const orig=editWs[method];let received;
+  editWs[method]=async(...args)=>{received=args.at(-1);throw new CloudError('conflict','Reload before saving');};
+  await click(save);assert.equal(received,beforeToken,method+' must submit the original editor version');
+  editWs[method]=orig;run('dirty=false');
+ }
+ context.__held=run('state.invoices');run('state.invoices=[]');const saves=fake.log.filter(x=>x==='saveDraft').length;
+ await click('g_go');assert.match(toasts(),/no longer exists/);assert.equal(fake.log.filter(x=>x==='saveDraft').length,saves);
+ run('state.invoices=__held;showInvoice(state.invoices[0].id)');
  await click('issueInv'); assert.equal(get('issueSheet').hidden,false,'success sheet appears only after the server-confirmed issue'); assert.equal(get('is_num').textContent,'RESH-2026-001'); assert.equal(run('state.invoices[0].status'),'issued');
  await click('is_done'); assert.equal(get('issueSheet').hidden,true);
  assert.equal(get('editInv').hidden,true);assert.equal(get('deleteInv').hidden,true);assert.match(get('paper').innerHTML,/RESH-2026-001/);
@@ -252,11 +268,29 @@ function makeFake(){
  get('au_email').value='b@example.test';get('au_pass').value='Fictional-Pass-9999';await submit('au_form');
  assert.deepEqual(visible(),['home']);
 
+ /* Successful completion from a previous session must not navigate or toast either. */
+ await click('addClient');get('ce_name').value='Old Session';get('ce_addr').value='Example';
+ let releaseOld;fake.gate=new Promise(r=>{releaseOld=r;});const oldSave=get('ce_save').onclick();await settle();
+ await click('signOut');get('toast').textContent='';releaseOld();fake.gate=null;await oldSave;await settle();
+ assert.deepEqual(visible(),['welcome']);assert.notEqual(toasts(),'Client saved');
+ get('au_email').value='b@example.test';get('au_pass').value='Fictional-Pass-9999';await submit('au_form');
+
+ /* A late sign-in completion must not unlock an independent workspace write. */
+ await click('signOut');let finishLogin,finishWrite;
+ fake.authGate=new Promise(r=>{finishLogin=r;});get('au_email').value='b@example.test';get('au_pass').value='Fictional-Pass-9999';
+ const pendingLogin=get('au_form').handlers.submit({preventDefault(){}});await settle();
+ await click('addClient');get('ce_name').value='Pending Save';get('ce_addr').value='Fictional';
+ fake.gate=new Promise(r=>{finishWrite=r;});const pendingSave=get('ce_save').onclick();await settle();
+ const attempts=fake.log.filter(x=>x==='saveClient').length;finishLogin();fake.authGate=null;await pendingLogin;
+ const secondSave=get('ce_save').onclick();await settle();assert.equal(fake.log.filter(x=>x==='saveClient').length,attempts,'late auth completion cannot permit a second write');
+ finishWrite();fake.gate=null;await pendingSave;await secondSave;await settle();
+
  /* migration preview performs no writes and leaves the browser copy untouched */
  await click('setBtn');assert.equal(get('openMigrate').hidden,false);
  const w2=fake.log.length;await click('openMigrate');
  assert.equal(visible()[0],'migrate'); assert.ok(run('migrationPlan.ok'),run('migrationPlan.errors.join()'));assert.match(get('mg_report').innerHTML,/Validation passed/);
  assert.equal(get('mg_import').disabled,true,'import stays disabled');assert.equal(get('mg_backup').disabled,false);
  assert.equal(fake.log.length,w2,'preview makes no cloud calls'); assert.equal(store.get('reshwin-invoice-studio-v2'),legacyRaw,'browser data untouched');
+ store.set('reshwin-invoice-studio-v2',JSON.stringify({clients:'invalid',invoices:[]}));await click('openMigrate');assert.match(get('mg_report').innerHTML,/not a valid/);assert.equal(get('mg_backup').disabled,true);
  console.log('PASS: app flows — auth gate, verification, isolation, failed/offline/duplicate writes, issuing, migration preview');
 })().catch(e=>{console.error(e);process.exit(1);});
