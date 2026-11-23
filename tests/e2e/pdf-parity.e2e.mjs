@@ -9,7 +9,7 @@ const mime = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/jav
 const hdr = Object.fromEntries(JSON.parse(fs.readFileSync(path.join(root, 'vercel.json'), 'utf8')).headers[0].headers.map(h => [h.key, h.value]));
 const srv = http.createServer((q, r) => { const u = new URL(q.url, 'http://x'); const f = path.join(root, u.pathname === '/' ? 'index.html' : u.pathname); if (!f.startsWith(root) || /node_modules|firebase-prep/.test(f) || !fs.existsSync(f) || fs.statSync(f).isDirectory()) { r.writeHead(404); return r.end(); } r.writeHead(200, { ...hdr, 'content-type': mime[path.extname(f)] || 'x/y' }); if (f.endsWith('index.html')) return r.end(fs.readFileSync(f, 'utf8').replace(/<script[^>]*src="(?:firebase-config\.js|boot\.mjs)"[^>]*><\/script>/g, '')); fs.createReadStream(f).pipe(r); }).listen(5179, '127.0.0.1');
 const results = []; const ok = (n, c, x = '') => { results.push([c ? 'PASS' : 'FAIL', n + (x ? ' — ' + x : '')]); if (!c) process.exitCode = 1; };
-const W = 794, H = 1123, norm = s => String(s).replace(/\s+/g, ' ').trim();
+const W = 794, H = 1123, SIDE_X = 54, norm = s => String(s).replace(/\s+/g, ' ').trim();
 const b = await chromium.launch({ executablePath: process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true });
 const page = await (await b.newContext({ viewport: { width: 900, height: 1200 } })).newPage(); const errs = []; page.on('pageerror', e => errs.push(e.message)); page.on('console', m => { if (m.type() === 'error' && !/Failed to load resource|firebase|gstatic/i.test(m.text())) errs.push(m.text().slice(0, 140)); });
 await page.goto('http://127.0.0.1:5179/'); await page.waitForSelector('#v-welcome', { state: 'attached' }); await page.waitForTimeout(1200);
@@ -51,6 +51,15 @@ for (const [name, inv] of Object.entries(FIXTURES)) {
     ok(`${name}: nothing outside the page margins (${P.n} page${P.n > 1 ? 's' : ''})`, out1.length === 0, out1.slice(0, 3).join(','));
     let overlaps = 0; for (const pg of P.pages) for (let i = 0; i < pg.items.length; i++) for (let j = i + 1; j < pg.items.length; j++) { const a = pg.items[i], c = pg.items[j]; const ox = Math.min(a.right, c.right) - Math.max(a.x, c.x), oy = Math.min(a.base, c.base) - Math.max(a.base - a.h, c.base - c.h); if (ox > 2 && oy > 0.45 * Math.min(a.h, c.h)) overlaps++; }
     ok(`${name}: no overlapping text`, overlaps === 0, overlaps + ' overlaps');
+    // Party columns flow independently: consecutive address lines (12.5px) in one column are evenly spaced (20px), never padded by the other column.
+    const uneven = P.pages.flatMap((pg, pi) => [SIDE_X, W / 2 + SIDE_X].flatMap(cx => { const ls = pg.items.filter(i => Math.abs(i.h - 12.5) < 0.3 && Math.abs(i.x - cx) < 1).sort((a, c) => a.base - c.base);
+      return ls.slice(1).map((l, k) => l.base - ls[k].base).filter(d => Math.abs(d - 20) > 0.6).map(d => `p${pi + 1}@${cx}:${d.toFixed(1)}`); }));
+    // On continued pages the first description line must not touch the repeated table header (bar ends ~111px from the top).
+    const cramped = P.pages.slice(1).flatMap((pg, pi) => { const hdrBar = pg.items.find(i => i.s.replace(/\s/g, '') === 'DESCRIPTION'); if (!hdrBar) return [];
+      const first = pg.items.filter(i => Math.abs(i.h - 14) < 0.3 && i.base > hdrBar.base).sort((a, c) => a.base - c.base)[0];
+      return first && first.base - first.h - (hdrBar.base + 13) < 8 ? [`p${pi + 2}:${(first.base - first.h - hdrBar.base - 13).toFixed(1)}`] : []; });
+    ok(`${name}: continued description lines have space below the table header`, cramped.length === 0, cramped.join(','));
+    ok(`${name}: address lines in each party column are evenly spaced`, uneven.length === 0, uneven.slice(0, 3).join(','));
     if (P.n > 1) ok(`${name}: multi-page output has page numbers`, new RegExp(`Page ${P.n} of ${P.n}`).test(text));
     if (SAME_LAYOUT.includes(name)) {
       const pg = P.pages[0].items, find = s => pg.find(i => i.s.includes(s)), findLast = s => pg.filter(i => i.s.includes(s)).pop(); const checks = [];

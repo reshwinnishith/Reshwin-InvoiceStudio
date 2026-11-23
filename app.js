@@ -247,11 +247,13 @@ function showDetails(){
  const saved=!!(state.from.name&&state.from.addr);$('f_saved').hidden=!saved;$('f_hint').hidden=saved;
  go('details');
 }
+// A save can finish after the person has already left its screen. Navigate only if they are still where the save started.
+const stillOn=(v)=>view===v;
 async function saveDetails(){
  const v=Core.validateSender(formValues(fromFields,'f_'));
  if(v.error){toast(v.error);return;}
  const ok=await perform($('f_save'),w=>w.saveSender(v.value,senderEditToken));
- if(ok){dirty=false;toast('Details saved');back();}
+ if(ok){toast('Details saved');if(stillOn('details')){dirty=false;back();}}
 }
 function renderClients(){
  const box=$('clientList');box.innerHTML='';
@@ -284,14 +286,14 @@ async function saveClient(){
  const v=Core.validateClient(formValues(clientFields,'ce_'));
  if(v.error){toast(v.error);return;}
  const ok=await perform($('ce_save'),w=>w.saveClient(v.value,editingClient,clientEditToken));
- if(ok){dirty=false;history=['home'];show('clients');paintView();toast('Client saved');}
+ if(ok){toast('Client saved');if(stillOn('client-edit')){dirty=false;history=['home'];show('clients');}paintView();}
 }
 async function deleteClient(){
  if(!editingClient)return;
  if(!confirm('Remove this client? Existing invoices will remain unchanged.'))return;
  const target=editingClient;
  const ok=await perform($('ce_delete'),w=>w.deleteClient(target,clientEditToken));
- if(ok){dirty=false;history=['home'];editingClient=null;show('clients');paintView();toast('Client removed');}
+ if(ok){toast('Client removed');if(stillOn('client-edit')){dirty=false;history=['home'];editingClient=null;show('clients');}paintView();}
 }
 
 /* ---------- invoices ---------- */
@@ -324,8 +326,10 @@ function fillClients(selected){
   const o=document.createElement('option');o.textContent='Add a client first';o.value='';s.appendChild(o);
   $('g_go').disabled=true;return;
  }
+ // A draft whose client has since been removed must never be silently re-pointed at another client: make the person choose.
+ if(selected&&!state.clients.some(c=>c.id===selected)){const o=document.createElement('option');o.value='';o.textContent='Choose a client (the original was removed)';s.appendChild(o);}
  for(const c of state.clients){const o=document.createElement('option');o.value=c.id;o.textContent=c.name;s.appendChild(o);}
- $('g_go').disabled=false;if(selected&&state.clients.some(c=>c.id===selected))s.value=selected;
+ $('g_go').disabled=false;if(selected)s.value=state.clients.some(c=>c.id===selected)?selected:'';
 }
 function openInvoiceEditor(invoiceId=null){
  const inv=state.invoices.find(x=>x.id===invoiceId);
@@ -352,14 +356,26 @@ async function submitInvoice(){
  if(old && invoiceStatus(old)!=='draft'){toast('Issued invoices cannot be edited. Duplicate to make a correction.');return;}
  let savedId=null;
  const ok=await perform($('g_go'),async w=>{savedId=await w.saveDraft(old?.id||null,v.value,client,state.from,invoiceEditToken);});
- if(ok){dirty=false;editingInvoice=null;history=['home'];viewingInvoice=savedId;pendingInvoice=savedId;show('invoice');paintView();toast('Draft saved. Issue it when it is ready.');}
+ if(!ok)return;
+ if(!stillOn('generate')){toast('Draft saved.');paintView();return;}
+ dirty=false;editingInvoice=null;history=['home'];viewingInvoice=savedId;pendingInvoice=savedId;show('invoice');paintView();toast('Draft saved. Issue it when it is ready.');
+}
+function staleSnapshots(inv){
+ const out=[],same=(a,b,keys)=>keys.every(k=>String(a?.[k]??'')===String(b?.[k]??''));
+ if(!same(inv.from,state.from,fromFields))out.push('Your Details');
+ const c=state.clients.find(x=>x.id===inv.clientId);
+ if(c&&!same(inv.client,c,clientFields))out.push('the client\'s details');
+ return out;
 }
 async function updateInvoiceStatus(status){
  const inv=state.invoices.find(x=>x.id===viewingInvoice);
  if(!inv)return;
  const old=invoiceStatus(inv);
  if(!Core.canTransition(old,status)){toast('This status change is not allowed');return;}
- const message=status==='issued'?'Issue this invoice? It will get its invoice number, and after issuing its details cannot be edited.':status==='paid'?'Mark this invoice as paid?':'Void this invoice? Its original record will remain for your records.';
+ // A draft keeps the sender/client details from when it was last saved. Say so before they are frozen by issuing.
+ const stale=status==='issued'?staleSnapshots(inv):[];
+ const note=stale.length?'\n\nNote: '+stale.join(' and ')+' changed since this draft was saved. This invoice will show the details saved in the draft. To use the current details, cancel, then Edit and save the draft first.':'';
+ const message=status==='issued'?'Issue this invoice? It will get its invoice number, and after issuing its details cannot be edited.'+note:status==='paid'?'Mark this invoice as paid?':'Void this invoice? Its original record will remain for your records.';
  if(!confirm(message))return;
  let result=null;
  const ok=await perform(status==='issued'?$('issueInv'):null,async w=>{result=status==='issued'?await w.issue(inv.id,inv.updateToken):await w.setStatus(inv.id,status,inv.updateToken);});
@@ -397,7 +413,7 @@ async function deleteDraft(){
  if(!confirm('Delete this draft? This cannot be undone.'))return;
  const target=inv.id;
  const ok=await perform($('deleteInv'),w=>w.deleteDraft(target,inv.updateToken));
- if(ok){viewingInvoice=null;history=[];show('home');paintView();toast('Draft deleted');}
+ if(ok){toast('Draft deleted');if(stillOn('invoice')&&viewingInvoice===target){viewingInvoice=null;history=[];show('home');}paintView();}
 }
 function duplicateInvoice(){
  const inv=state.invoices.find(x=>x.id===viewingInvoice);

@@ -3,10 +3,11 @@
   "private": true,
   "type": "commonjs",
   "scripts": {
-    "check": "node --check app.js && node --check pdf.js && node --check core.js && node --check invoice-view.js && node --check cloud.mjs && node --check boot.mjs && node --check tests/smoke.cjs",
+    "check": "node --check app.js && node --check pdf.js && node --check core.js && node --check invoice-view.js && node --check cloud.mjs && node --check boot.mjs && node --check tests/smoke.cjs && node --check scripts/materialize-scoped-rules.mjs",
     "test:unit": "node tests/core.test.cjs && node tests/invoice-view.test.cjs && node tests/smoke.cjs",
     "test:emulator": "node scripts/run-emulator-tests.mjs",
     "test:e2e": "node scripts/run-emulator-tests.mjs --e2e",
+    "test:journey": "node scripts/run-emulator-tests.mjs --journey",
     "test": "npm run check && npm run test:unit && npm run test:emulator",
     "test:parity": "node tests/e2e/pdf-parity.e2e.mjs"
   },

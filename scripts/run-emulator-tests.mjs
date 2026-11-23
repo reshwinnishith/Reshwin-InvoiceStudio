@@ -14,7 +14,7 @@ const cacheDir = join(homedir(), '.cache/firebase/emulators');
 // The Firebase CLI may replace the cached emulator jar with the version it pins, so locate whichever jar is present.
 const jar = process.env.INVOICE_FIRESTORE_JAR || join(cacheDir, (await readdir(cacheDir).catch(() => [])).filter(f => /^cloud-firestore-emulator-v[\d.]+\.jar$/.test(f)).sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).at(-1) || 'MISSING-cloud-firestore-emulator.jar');
 const firebaseLib = (process.env.INVOICE_FIREBASE_LIB || '/opt/homebrew/lib/node_modules/firebase-tools/lib/').replace(/\/?$/, '/');
-const testCommand = process.argv.includes('--e2e') ? 'node tests/e2e/browser.e2e.mjs' : 'node --test --test-concurrency=1 tests/rules/*.test.mjs tests/cloud/*.test.mjs';
+const testCommand = process.argv.includes('--journey') ? 'node tests/e2e/journey.e2e.mjs' : process.argv.includes('--e2e') ? 'node tests/e2e/browser.e2e.mjs' :'node --test --test-concurrency=1 tests/rules/*.test.mjs tests/cloud/*.test.mjs';
 if (Number(process.versions.node.split('.')[0]) < 22) throw Error('Run with Node 22 or later.');
 await Promise.all([access(java), access(jar), access(join(firebaseLib, 'commands/emulators-exec.js'))]);
 

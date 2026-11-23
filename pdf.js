@@ -87,13 +87,20 @@
     };
     const left = colLines('From', m.from, m.from.pan ? [['PAN', m.from.pan]] : []);
     const right = colLines('Invoice To', m.to, m.to.tax);
-    const rows = Math.max(left.length, right.length); let blockTop = y; y += 22;
-    for (let i = 0; i < rows; i++) {
-      const a = left[i], b = right[i], h = Math.max((a?.lh || 0) + (a?.gap || 0), (b?.lh || 0) + (b?.gap || 0));
-      if (y + h > LIMIT) { rule(W / 2, blockTop, W / 2, y, INK, 1.5); newPage(); blockTop = y; }
-      for (const [item, x] of [[a, SIDE], [b, W / 2 + SIDE]]) if (item) { font(item.f, item.s, item.px); col(item.c); txt(item.t, x, baseline(y + item.gap, item.lh, item.px), { cs: item.cs }); }
-      y += h;
+    // Each column flows independently (as on screen); a page break applies to both, so neither column gets gaps from the other.
+    let blockTop = y; y += 22;
+    const cols = [{ lines: left, x: SIDE, i: 0, y }, { lines: right, x: W / 2 + SIDE, i: 0, y }];
+    for (;;) {
+      for (const c of cols) while (c.i < c.lines.length) {
+        const it = c.lines[c.i], h = it.lh + it.gap;
+        if (c.y + h > LIMIT) break;
+        font(it.f, it.s, it.px); col(it.c); txt(it.t, c.x, baseline(c.y + it.gap, it.lh, it.px), { cs: it.cs }); c.y += h; c.i++;
+      }
+      if (cols.every(c => c.i >= c.lines.length)) break;
+      rule(W / 2, blockTop, W / 2, Math.max(...cols.map(c => c.y)), INK, 1.5); newPage(); blockTop = y;
+      for (const c of cols) { c.y = y; if (c.i < c.lines.length) c.lines[c.i] = { ...c.lines[c.i], gap: 0 }; }
     }
+    y = Math.max(...cols.map(c => c.y));
     y += 22; rule(W / 2, blockTop, W / 2, y, INK, 1.5); rule(0, y + 0.75, W, y + 0.75, INK, 1.5); y += 1.5;
 
     // Items table
@@ -105,9 +112,10 @@
     for (const r of m.rows) {
       const lines = wrap(r.desc, 486, 'helvetica', 'normal', 14); let i = 0, first = true;
       while (i < lines.length) {
-        const room = Math.floor((LIMIT - y - (first ? 40 : 20)) / 21);
+        const pad = first ? 20 : 12; // continued lines also get breathing room below the repeated table header
+        const room = Math.floor((LIMIT - y - pad - 20) / 21);
         if (room < 1) { newPage(); tableHeader(); continue; }
-        const take = Math.min(room, lines.length - i), top = y + (first ? 20 : 0);
+        const take = Math.min(room, lines.length - i), top = y + pad;
         if (first) { font('courier', 'normal', 14); col(DIM); txt(r.sno, SIDE, baseline(top, 21, 14)); }
         font('helvetica', 'normal', 14); col(INK); lines.slice(i, i + take).forEach((l, k) => txt(l, 92, baseline(top + k * 21, 21, 14)));
         if (first) { font('courier', 'normal', 14); money(r.amount, W - SIDE, baseline(top, 21, 14), 14, INK, 'right'); }

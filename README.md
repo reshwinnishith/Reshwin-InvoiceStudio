@@ -26,9 +26,10 @@ Data saved by earlier browser-only versions stays in that browser's localStorage
 ```sh
 npm ci && npm test        # checks, unit/app tests, Auth+Firestore emulator suites
 npm run test:e2e          # real Chrome against isolated emulators
+npm run test:journey      # full new-user journey + edge cases + layout/a11y sweep (real Chrome, emulators)
 npm run test:parity       # fictional PDF fixtures, no Firebase initialization
 ```
 
 GitHub Actions runs syntax, unit/app, Auth/Firestore emulator, Chrome end-to-end and PDF parity checks on main, the V2 branch and pull requests. Local emulator tests use a demo project and no production credentials. Real iPhone Safari and live email delivery still need separately approved testing.
 
-Use Node 22+, Java 21+, Firebase CLI 15.20.0 and a downloaded Firestore emulator (`firebase setup:emulators:firestore`). On other machines set `INVOICE_JAVA`, `INVOICE_FIREBASE_LIB` (CLI lib directory) and `CHROME_PATH`; optionally `INVOICE_FIRESTORE_JAR`. CI sets the platform paths explicitly.
+On macOS with Homebrew, prefix any command with `scripts/local-env.sh` (e.g. `scripts/local-env.sh npm test`) to use Node 22, Java 21 and Chrome without changing global defaults. Use Node 22+, Java 21+, Firebase CLI 15.20.0 and a downloaded Firestore emulator (`firebase setup:emulators:firestore`). On other machines set `INVOICE_JAVA`, `INVOICE_FIREBASE_LIB` (CLI lib directory) and `CHROME_PATH`; optionally `INVOICE_FIRESTORE_JAR`. CI sets the platform paths explicitly.
