@@ -56,7 +56,11 @@ async function signUp(p, email, pass) {
   await p.waitForSelector('#v-verify:not([hidden])');
   await verifyEmail(email); await p.click('#vf_check'); await p.waitForSelector('#v-home:not([hidden])', { timeout: 20000 });
 }
-async function signOut(p) { await p.click('#setBtn'); await p.click('#signOut'); await p.waitForSelector('#v-welcome:not([hidden])', { timeout: 20000 }); await p.waitForTimeout(800); }
+// Logout deliberately reloads the page: wait for a NEW document showing the welcome screen, never the old one mid-reload.
+async function signOut(p) {
+  await p.click('#setBtn'); await p.evaluate(() => { window.__preLogout = true; }); await p.click('#signOut');
+  await waitFor(p, () => window.__preLogout === undefined && !document.getElementById('v-welcome').hidden, null, { timeout: 20000 });
+}
 async function addClient(p, name, addr, extra = {}) {
   await p.click('#navClients'); await p.click('#addClient'); await p.waitForSelector('#v-client-edit:not([hidden])');
   await p.fill('#ce_name', name); await p.fill('#ce_addr', addr); if (extra.pan) await p.fill('#ce_pan', extra.pan); if (extra.gstin) await p.fill('#ce_gstin', extra.gstin);
